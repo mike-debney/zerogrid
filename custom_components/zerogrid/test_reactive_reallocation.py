@@ -117,7 +117,7 @@ class TestReactivePowerReallocation:
 
         # Mock recalculate_load_control to track if it gets called
         with pytest.mock.patch(
-            "homeassistant.components.zero_grid.recalculate_load_control"
+            "homeassistant.components.zerogrid.recalculate_load_control"
         ) as mock_recalc:
             mock_recalc.return_value = AsyncMock()
 
@@ -168,7 +168,7 @@ class TestReactivePowerReallocation:
 
         # Mock recalculate_load_control
         with pytest.mock.patch(
-            "homeassistant.components.zero_grid.recalculate_load_control"
+            "homeassistant.components.zerogrid.recalculate_load_control"
         ) as mock_recalc:
             await check_consumption_variance_and_reallocate(hass)
 
@@ -188,7 +188,7 @@ class TestReactivePowerReallocation:
 
         # Mock recalculate_load_control
         with pytest.mock.patch(
-            "homeassistant.components.zero_grid.recalculate_load_control"
+            "homeassistant.components.zerogrid.recalculate_load_control"
         ) as mock_recalc:
             await check_consumption_variance_and_reallocate(hass)
 

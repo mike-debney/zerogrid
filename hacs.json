@@ -1,5 +1,21 @@
 {
-  "name": "hass-updateme",
-  "country": "US",
-  "render_readme": true
+  "domain": "zerogrid",
+  "name": "Zerogrid",
+  "country": "NZ",
+  "render_readme": true,
+  "documentation": "https://github.com/mike-debney/zerogrid",
+  "issue_tracker": "https://github.com/mike-debney/zerogrid/issues",
+  "dependencies": [],
+  "codeowners": [
+    "@mike-debney"
+  ],
+  "version": "0.1.0",
+  "requirements": [
+    "voluptuous"
+  ],
+  "iot_class": "calculated",
+  "config_flow": false,
+  "loggers": [
+    "zerogrid"
+  ]
 }

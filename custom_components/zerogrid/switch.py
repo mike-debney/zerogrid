@@ -102,13 +102,13 @@ class AllowGridImportSwitch(SwitchEntity):
         # Import here to avoid circular import
         if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
             # Get the STATE from the main module
-            if "homeassistant.components.zero_grid" in sys.modules:
-                zero_grid_module = sys.modules["homeassistant.components.zero_grid"]
-                if hasattr(zero_grid_module, "STATE"):
-                    zero_grid_module.STATE.allow_grid_import = self._attr_is_on
+            if "homeassistant.components.zerogrid" in sys.modules:
+                zerogrid_module = sys.modules["homeassistant.components.zerogrid"]
+                if hasattr(zerogrid_module, "STATE"):
+                    zerogrid_module.STATE.allow_grid_import = self._attr_is_on
                     # Trigger recalculation
-                    if hasattr(zero_grid_module, "recalculate_load_control"):
-                        await zero_grid_module.recalculate_load_control(self.hass)
+                    if hasattr(zerogrid_module, "recalculate_load_control"):
+                        await zerogrid_module.recalculate_load_control(self.hass)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Allow grid import."""
