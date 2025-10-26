@@ -11,7 +11,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from .const import DOMAIN
+from . import STATE, recalculate_load_control
+from .const import ALLOW_GRID_IMPORT_SWITCH_ID, DOMAIN, ENABLE_LOAD_CONTROL_SWITCH_ID
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,8 +31,8 @@ async def async_setup_platform(
 
     # Store references in hass.data for updates
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN]["enable_load_control_switch"] = enable_switch
-    hass.data[DOMAIN]["allow_grid_import_switch"] = allow_grid_import_switch
+    hass.data[DOMAIN][ENABLE_LOAD_CONTROL_SWITCH_ID] = enable_switch
+    hass.data[DOMAIN][ALLOW_GRID_IMPORT_SWITCH_ID] = allow_grid_import_switch
 
     async_add_entities([enable_switch, allow_grid_import_switch])
 
@@ -46,25 +47,39 @@ class EnableLoadControlSwitch(SwitchEntity):
     def __init__(self) -> None:
         """Initialize the switch."""
         self._attr_name = "Enable load control"
-        self._attr_unique_id = f"{DOMAIN}_enable_load_control"
+        self._attr_unique_id = ENABLE_LOAD_CONTROL_SWITCH_ID
         self._attr_is_on = True
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity being added to hass."""
+        await super().async_added_to_hass()
+        # Sync initial state to the integration
+        await self._update_integration_state()
 
     @property
     def is_on(self) -> bool:
         """Return true if the switch is on."""
         return bool(self._attr_is_on)
 
+    async def _update_integration_state(self) -> None:
+        """Update the integration's STATE and trigger recalculation."""
+        if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
+            STATE.enable_load_control = self._attr_is_on
+            await recalculate_load_control(self.hass)
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         self._attr_is_on = True
         self.async_write_ha_state()
         _LOGGER.info("Load control enabled")
+        await self._update_integration_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         self._attr_is_on = False
         self.async_write_ha_state()
         _LOGGER.info("Load control disabled")
+        await self._update_integration_state()
 
     @callback
     def update_state(self, is_on: bool) -> None:
@@ -83,7 +98,7 @@ class AllowGridImportSwitch(SwitchEntity):
     def __init__(self) -> None:
         """Initialize the switch."""
         self._attr_name = "Allow grid import"
-        self._attr_unique_id = f"{DOMAIN}_allow_grid_import"
+        self._attr_unique_id = ALLOW_GRID_IMPORT_SWITCH_ID
         self._attr_is_on = True
 
     async def async_added_to_hass(self) -> None:
@@ -99,16 +114,9 @@ class AllowGridImportSwitch(SwitchEntity):
 
     async def _update_integration_state(self) -> None:
         """Update the integration's STATE and trigger recalculation."""
-        # Import here to avoid circular import
         if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
-            # Get the STATE from the main module
-            if "homeassistant.components.zerogrid" in sys.modules:
-                zerogrid_module = sys.modules["homeassistant.components.zerogrid"]
-                if hasattr(zerogrid_module, "STATE"):
-                    zerogrid_module.STATE.allow_grid_import = self._attr_is_on
-                    # Trigger recalculation
-                    if hasattr(zerogrid_module, "recalculate_load_control"):
-                        await zerogrid_module.recalculate_load_control(self.hass)
+            STATE.allow_grid_import = self._attr_is_on
+            await recalculate_load_control(self.hass)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Allow grid import."""
