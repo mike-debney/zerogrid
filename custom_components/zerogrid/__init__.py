@@ -37,6 +37,18 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     initialise_state(hass)
     subscribe_to_entity_changes(hass)
 
+    # Register services
+    async def handle_recalculate_load_control(call) -> None:
+        """Handle the recalculate_load_control service call."""
+        _LOGGER.info("Manual recalculation triggered via service call")
+        await recalculate_load_control(hass)
+
+    hass.services.async_register(
+        DOMAIN,
+        "recalculate_load_control",
+        handle_recalculate_load_control,
+    )
+
     # Set up platforms
     hass.async_create_task(
         async_load_platform(hass, Platform.SENSOR, DOMAIN, {}, config)
@@ -76,6 +88,9 @@ def parse_config(domain_config):
     )
     CONFIG.enable_reactive_reallocation = domain_config.get(
         "enable_reactive_reallocation", True
+    )
+    CONFIG.enable_automatic_recalculation = domain_config.get(
+        "enable_automatic_recalculation", True
     )
 
     control_options = domain_config.get("controllable_loads", [])
@@ -152,6 +167,11 @@ def initialise_state(hass: HomeAssistant):
 
         STATE.controllable_loads[load_name] = load_state
         PLAN.controllable_loads[load_name] = ControllableLoadPlanState()
+        _LOGGER.error(
+            "Switch entity init for %s: %s",
+            load_name,
+            PLAN.controllable_loads[load_name].is_on,
+        )
 
     _LOGGER.debug("Initialised state: %s", STATE)
 
@@ -174,6 +194,8 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
         if event.event_type != "state_changed":
             return
 
+        recalculate_now = False
+
         # Update state based on entity changes
         entity_id = event.data["entity_id"]
         new_state = event.data.get("new_state")
@@ -190,6 +212,7 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                 )
                 await safety_abort(hass)
                 return
+            recalculate_now = True
 
         elif entity_id == CONFIG.mains_voltage_entity:
             if new_state is not None:
@@ -200,6 +223,7 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                 )
                 await safety_abort(hass)
                 return
+            recalculate_now = True
 
         elif entity_id == CONFIG.solar_generation_kw_entity:
             if new_state is not None:
@@ -209,7 +233,7 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                 _LOGGER.warning(
                     "Solar generation entity is unavailable, assuming zero generation"
                 )
-                return
+            recalculate_now = True
 
         else:
             STATE.load_control_consumption_amps = 0.0
@@ -217,14 +241,15 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
             # match to controllable loads
             for control in CONFIG.controllable_loads.values():
                 if entity_id == control.switch_entity:
+                    _LOGGER.error(
+                        "Switch entity change for %s: %s", control.name, new_state.state
+                    )
                     if new_state is not None:
                         STATE.controllable_loads[control.name].is_on = (
                             new_state.state.lower() == "on"
                         )
                     else:
-                        STATE.controllable_loads[
-                            control.name
-                        ].is_on = True  # Assume on if unavailable
+                        STATE.controllable_loads[control.name].is_on = False
 
                 if entity_id == control.load_amps_entity:
                     if new_state is not None:
@@ -237,19 +262,21 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                     control.name
                 ].current_load_amps
 
-        await recalculate_load_control(hass)
+        if CONFIG.enable_automatic_recalculation and recalculate_now:
+            await recalculate_load_control(hass)
 
-        # Check for consumption variance and potentially trigger reallocation
-        if CONFIG.enable_reactive_reallocation:
-            await check_consumption_variance_and_reallocate(hass)
+        # # Check for consumption variance and potentially trigger reallocation
+        # if CONFIG.enable_reactive_reallocation:
+        #     await check_consumption_variance_and_reallocate(hass)
 
     async def state_time_listener(now: datetime) -> None:
-        _LOGGER.debug("Time listener fired")
-        await recalculate_load_control(hass)
+        if CONFIG.enable_automatic_recalculation:
+            _LOGGER.debug("Time listener fired")
+            await recalculate_load_control(hass)
 
-        # Check for consumption variance and potentially trigger reallocation
-        if CONFIG.enable_reactive_reallocation:
-            await check_consumption_variance_and_reallocate(hass)
+            # # Check for consumption variance and potentially trigger reallocation
+            # if CONFIG.enable_reactive_reallocation:
+            #     await check_consumption_variance_and_reallocate(hass)
 
     _LOGGER.debug("Subscribing... %s", entity_ids)
     async_track_state_change_event(hass, entity_ids, state_automation_listener)
@@ -259,65 +286,15 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
 
 
 @bind_hass
-async def check_consumption_variance_and_reallocate(hass: HomeAssistant):
-    """Check if loads are consuming less than expected and trigger reallocation."""
-
-    now = datetime.now()
-    total_unused_power = 0.0
-    loads_with_unused_power = []
-
-    for load_name, load_state in STATE.controllable_loads.items():
-        plan_state = PLAN.controllable_loads.get(load_name)
-        if not plan_state or not plan_state.is_on:
-            continue
-
-        # Calculate the variance between expected and actual consumption
-        expected_consumption = plan_state.expected_load_amps
-        actual_consumption = load_state.current_load_amps
-        variance = expected_consumption - actual_consumption
-
-        # Update variance tracking
-        load_state.consumption_variance = variance
-        load_state.expected_load_amps = expected_consumption
-
-        # Check if this load has significant unused power
-        if (
-            variance >= CONFIG.variance_detection_threshold
-            and load_state.last_expected_update is not None
-            and (now - load_state.last_expected_update).total_seconds()
-            >= CONFIG.variance_detection_delay_seconds
-        ):
-            total_unused_power += variance
-            loads_with_unused_power.append(load_name)
-            _LOGGER.info(
-                "Load %s is using %f A less than expected (%f A), freeing %f A for reallocation",
-                load_name,
-                actual_consumption,
-                expected_consumption,
-                variance,
-            )
-
-    # If we have significant unused power, trigger reallocation
-    if total_unused_power >= CONFIG.variance_detection_threshold:
-        _LOGGER.info(
-            "Total unused power detected: %f A from loads %s - triggering reallocation",
-            total_unused_power,
-            loads_with_unused_power,
-        )
-        # Add the unused power to our available budget and recalculate
-        await recalculate_load_control(hass)
-
-
-@bind_hass
 async def calculate_effective_available_power() -> float:
     """Calculate available power including power freed by underperforming loads."""
     # Start with the base available power calculation
     safety_margin_amps = 0.0
 
     # Allow grid import
-    grid_available_amps = 0.0
+    grid_maximum_amps = 0.0
     if STATE.allow_grid_import:
-        grid_available_amps = CONFIG.max_house_load_amps
+        grid_maximum_amps = CONFIG.max_house_load_amps
 
     # Convert solar generation to amps
     solar_generation_amps = 0.0
@@ -332,9 +309,9 @@ async def calculate_effective_available_power() -> float:
             total_load_not_under_control -= load_state.current_load_amps
 
     total_available_amps = (
-        grid_available_amps
+        grid_maximum_amps
         + solar_generation_amps
-        - total_load_not_under_control
+        - max(total_load_not_under_control, 0)
         - safety_margin_amps
     )
     _LOGGER.debug(
@@ -371,10 +348,7 @@ async def recalculate_load_control(hass: HomeAssistant):  # noqa: C901
     now = datetime.now()
     new_plan = PlanState()
 
-    # Calculate effective available power (including reactive reallocation)
-    # Returns: (display_available, planning_available)
-    # - display_available: shown to user, excludes reactive reallocation
-    # - planning_available: used for planning, includes reactive reallocation
+    # Calculate effective available power, loads that we are controlling are included
     available_amps = await calculate_effective_available_power()
 
     new_plan.available_amps = available_amps
@@ -413,9 +387,6 @@ async def recalculate_load_control(hass: HomeAssistant):  # noqa: C901
         STATE.house_consumption_amps > CONFIG.max_house_load_amps - safety_margin_amps
     )
 
-    # Track power freed up by loads that get turned off during this planning cycle
-    freed_power_this_cycle = 0.0
-
     # Loop over controllable loads and determine if they should be on or not
     for load_index, load_name in enumerate(prioritised_loads):
         config = CONFIG.controllable_loads[load_name]
@@ -423,91 +394,16 @@ async def recalculate_load_control(hass: HomeAssistant):  # noqa: C901
         previous_plan = PLAN.controllable_loads[load_name]
         plan = new_plan.controllable_loads[load_name] = ControllableLoadPlanState()
 
-        plan.is_on = False
-        plan.expected_load_amps = 0.0
-
         if not state.is_on_load_control and state.is_on:
             # Load is manually turned on - we have no control
             plan.is_on = state.is_on
             _LOGGER.debug("Load manually turned on: %s", load_name)
             continue
 
-        # Only credit back current load if this load is currently on
-        # Also add any power freed up by higher-priority loads that got turned off
-        current_load_credit = 0.0
-        if state.is_on:
-            current_load_credit = state.current_load_amps
-        available_amps += current_load_credit
+        plan.is_on = False
+        plan.expected_load_amps = 0.0
 
-        # Calculate minimum power requirements for all remaining lower-priority loads
-        remaining_loads_min_power = 0.0
-        for remaining_load_name in prioritised_loads[load_index + 1 :]:
-            remaining_config = CONFIG.controllable_loads[remaining_load_name]
-            remaining_loads_min_power += remaining_config.min_controllable_load_amps
-
-        # Smart priority allocation: check if we should make room for this load by throttling lower-priority loads
-        available_for_this_load = available_amps - remaining_loads_min_power
-
-        # If this load can't fit, check if we can make room by throttling lower-priority throttleable loads
-        if (
-            available_for_this_load < config.min_controllable_load_amps
-            and config.min_controllable_load_amps > 0
-        ):
-            # Calculate how much power we could free up by throttling lower-priority loads to minimum
-            potential_freed_power = 0.0
-            for lower_priority_load_name in prioritised_loads[load_index + 1 :]:
-                lower_config = CONFIG.controllable_loads[lower_priority_load_name]
-                lower_previous_plan = PLAN.controllable_loads[lower_priority_load_name]
-                if (
-                    lower_config.can_throttle
-                    and lower_previous_plan.is_on
-                    and lower_previous_plan.throttle_amps
-                    > lower_config.min_controllable_load_amps
-                ):
-                    # Power we could free by throttling this load to minimum
-                    freeable_power = (
-                        lower_previous_plan.throttle_amps
-                        - lower_config.min_controllable_load_amps
-                    )
-                    potential_freed_power += freeable_power
-                    _LOGGER.debug(
-                        "Could free %f A from %s (current=%f, min=%f)",
-                        freeable_power,
-                        lower_priority_load_name,
-                        lower_previous_plan.throttle_amps,
-                        lower_config.min_controllable_load_amps,
-                    )
-
-            # If we can free enough power by throttling, include that in our budget
-            if potential_freed_power > 0:
-                available_for_this_load += potential_freed_power
-                _LOGGER.debug(
-                    "Load %s: could free %f A by throttling lower-priority loads, new available=%f",
-                    load_name,
-                    potential_freed_power,
-                    available_for_this_load,
-                )
-
-        capped_allowable_for_this_load = min(
-            config.max_controllable_load_amps, available_for_this_load
-        )
-
-        # Only allocate power if we can meet minimum requirements
-        if capped_allowable_for_this_load >= config.min_controllable_load_amps:
-            will_consume_amps = capped_allowable_for_this_load
-        else:
-            # Not enough power available even with throttling
-            will_consume_amps = 0.0
-
-        _LOGGER.debug(
-            "Load %s planning: available=%f, remaining_min=%f, max_allowable=%f, will_consume=%f",
-            load_name,
-            available_amps,
-            remaining_loads_min_power,
-            capped_allowable_for_this_load,
-            will_consume_amps,
-        )
-
+        # Determine if we are rate-limited on switching or throttling
         is_switch_rate_limited = (
             state.last_toggled is not None
             and state.last_toggled
@@ -521,14 +417,28 @@ async def recalculate_load_control(hass: HomeAssistant):  # noqa: C901
             > now
         )
 
+        # Only allocate power if we can meet minimum requirements
+        if available_amps > config.min_controllable_load_amps:
+            if config.can_throttle and is_throttle_rate_limited:
+                # If we are rate-limited on throttling, keep previous expected load
+                will_consume_amps = previous_plan.expected_load_amps
+            else:
+                will_consume_amps = min(
+                    available_amps, config.max_controllable_load_amps
+                )
+        else:
+            # Not enough power available even with throttling
+            will_consume_amps = 0.0
+
         # Determine if this load should be on
         # If we have no available budget, all loads should be off
         # If will_consume_amps is 0, the load should be off (not enough power for lower-priority loads)
-        if new_plan.available_amps <= 0 or will_consume_amps <= 0:
-            should_be_on = False
+        # Or if we are currently overloading the fuse
+        should_be_on = False
+        if new_plan.available_amps <= 0 or will_consume_amps <= 0 or overload:
+            will_consume_amps = 0.0
         else:
             should_be_on = will_consume_amps <= available_amps
-        plan.is_on = previous_plan.is_on
 
         _LOGGER.debug(
             "Load %s planning: should_be_on=%s, will_consume_amps=%f, available_amps=%f, previous_plan.is_on=%s",
@@ -539,181 +449,37 @@ async def recalculate_load_control(hass: HomeAssistant):  # noqa: C901
             previous_plan.is_on,
         )
 
-        # Immediately shed load if we are overloading the fuse
-        if overload:
-            plan.is_on = False
-            _LOGGER.debug("Turning load %s off due to overload", load_name)
-            # Track power freed up if this load was previously on
-            if previous_plan.is_on:
-                freed_power_this_cycle += state.current_load_amps
-                _LOGGER.debug(
-                    "Load %s turning off frees up %f A for lower-priority loads",
-                    load_name,
-                    state.current_load_amps,
-                )
-        elif should_be_on != plan.is_on:
-            if not is_switch_rate_limited:
-                plan.is_on = should_be_on
-                if plan.is_on:
-                    _LOGGER.debug("Planning to turn load %s on", load_name)
-                else:
-                    _LOGGER.debug("Planning to turn load %s off", load_name)
-                    # Track power freed up if this load was previously on and is being turned off
-                    if previous_plan.is_on and not plan.is_on:
-                        freed_power_this_cycle += state.current_load_amps
-                        _LOGGER.debug(
-                            "Load %s turning off frees up %f A for lower-priority loads",
-                            load_name,
-                            state.current_load_amps,
-                        )
+        if should_be_on != previous_plan.is_on and not is_switch_rate_limited:
+            plan.is_on = should_be_on
+            if plan.is_on:
+                _LOGGER.debug("Planning to turn load %s on", load_name)
             else:
-                _LOGGER.debug("Unable to change load %s due to rate limit", load_name)
+                _LOGGER.debug("Planning to turn load %s off", load_name)
         else:
-            _LOGGER.debug("Load %s plan unchanged: is_on=%s", load_name, plan.is_on)
+            plan.is_on = previous_plan.is_on
+            if not plan.is_on:
+                will_consume_amps = 0.0
+            # else:
+            #     will_consume_amps = state.current_load_amps
+            if is_switch_rate_limited:
+                _LOGGER.debug(
+                    "Unable to change load %s due to switch rate limit", load_name
+                )
+
+        # Ensure that we aren't about to overload the fuse
+        if plan.is_on and will_consume_amps > available_amps:
+            plan.is_on = False
+            will_consume_amps = 0.0
 
         # Account for expected load in budget
         if plan.is_on:
             plan.expected_load_amps = will_consume_amps
             new_plan.used_amps += will_consume_amps
-            _LOGGER.debug(
-                "Before subtraction for %s: available_amps=%f, will_consume_amps=%f",
-                load_name,
-                available_amps,
-                will_consume_amps,
-            )
             available_amps -= will_consume_amps
-            _LOGGER.debug(
-                "After subtraction for %s: available_amps=%f", load_name, available_amps
-            )
 
             # Set throttle value for throttleable loads
             if config.can_throttle:
                 plan.throttle_amps = will_consume_amps
-                _LOGGER.debug(
-                    "Setting throttle for %s: will_consume_amps=%f -> plan.throttle_amps=%f",
-                    load_name,
-                    will_consume_amps,
-                    plan.throttle_amps,
-                )
-            else:
-                plan.throttle_amps = 0.0
-        else:
-            plan.throttle_amps = 0.0
-
-        if config.can_throttle and is_throttle_rate_limited:
-            # We won't change the expected load due to throttling
-            will_consume_amps = previous_plan.expected_load_amps
-            _LOGGER.debug("Unable to throttle load %s due to rate limit", load_name)
-
-    # Cap used_amps to never exceed the physical grid capacity
-    # This is a safety check - if we've somehow over-allocated, we need to reduce loads
-    # But don't artificially inflate used_amps to match available when loads use less
-    grid_available_amps = CONFIG.max_house_load_amps - STATE.house_consumption_amps
-    max_safe_available = grid_available_amps - safety_margin_amps
-    if new_plan.used_amps > max_safe_available:
-        _LOGGER.warning(
-            "Planned consumption %f A exceeds safe limit %f A - emergency load shedding required!",
-            new_plan.used_amps,
-            max_safe_available,
-        )
-        # This should trigger emergency load shedding below, but cap for safety
-        # Don't update used_amps here - let the emergency shedding handle it
-
-    # Post-planning adjustment: throttle down lower-priority loads to make room for higher-priority loads
-    for load_index, load_name in enumerate(prioritised_loads):
-        config = CONFIG.controllable_loads[load_name]
-        previous_plan = PLAN.controllable_loads[load_name]
-        new_plan_load = new_plan.controllable_loads[load_name]
-
-        # If this load is turning on and needs power, check if we need to throttle lower-priority loads
-        if (
-            new_plan_load.is_on
-            and not previous_plan.is_on
-            and new_plan_load.throttle_amps > 0
-        ):
-            power_needed = new_plan_load.throttle_amps
-            power_available = (
-                new_plan.available_amps - new_plan.used_amps
-            )  # Remaining unused power
-
-            if power_available < power_needed:
-                power_to_free = power_needed - power_available
-                _LOGGER.debug(
-                    "Load %s turning on needs %f A, only %f A available, need to free %f A",
-                    load_name,
-                    power_needed,
-                    power_available,
-                    power_to_free,
-                )
-
-                # Throttle down lower-priority loads to free up power
-                power_freed = 0.0
-                for lower_priority_load_name in prioritised_loads[load_index + 1 :]:
-                    if power_freed >= power_to_free:
-                        break
-
-                    lower_config = CONFIG.controllable_loads[lower_priority_load_name]
-                    lower_new_plan = new_plan.controllable_loads[
-                        lower_priority_load_name
-                    ]
-
-                    if (
-                        lower_config.can_throttle
-                        and lower_new_plan.is_on
-                        and lower_new_plan.throttle_amps
-                        > lower_config.min_controllable_load_amps
-                    ):
-                        # Calculate how much we can throttle this load down
-                        current_throttle = lower_new_plan.throttle_amps
-                        min_throttle = lower_config.min_controllable_load_amps
-                        max_reduction = current_throttle - min_throttle
-
-                        # Throttle down by the minimum needed or maximum possible
-                        reduction_needed = min(
-                            max_reduction, power_to_free - power_freed
-                        )
-                        new_throttle = current_throttle - reduction_needed
-
-                        _LOGGER.debug(
-                            "Throttling %s from %f A to %f A (reduction=%f A) to make room for %s",
-                            lower_priority_load_name,
-                            current_throttle,
-                            new_throttle,
-                            reduction_needed,
-                            load_name,
-                        )
-
-                        lower_new_plan.throttle_amps = new_throttle
-                        lower_new_plan.expected_load_amps = new_throttle
-                        new_plan.used_amps -= reduction_needed
-                        power_freed += reduction_needed
-
-    # Validate that we haven't planned more consumption than we have available from solar
-    if new_plan.used_amps > new_plan.available_amps:
-        over_allocation = new_plan.used_amps - new_plan.available_amps
-        _LOGGER.warning(
-            "Power over-allocation detected! Planned %f A but only %f A available (over by %f A)",
-            new_plan.used_amps,
-            new_plan.available_amps,
-            over_allocation,
-        )
-
-        # Emergency reduction: turn off lowest priority loads until we're within budget
-        for load_name in reversed(prioritised_loads):
-            if new_plan.used_amps <= new_plan.available_amps:
-                break
-
-            plan_load = new_plan.controllable_loads[load_name]
-            if plan_load.is_on:
-                _LOGGER.warning(
-                    "Emergency turn-off of %s to prevent over-allocation (was using %f A)",
-                    load_name,
-                    plan_load.expected_load_amps,
-                )
-                new_plan.used_amps -= plan_load.expected_load_amps
-                plan_load.is_on = False
-                plan_load.expected_load_amps = 0
-                plan_load.throttle_amps = 0
 
     # Update entity with actual planned consumption (not capped to available)
     if DOMAIN in hass.data and "controlled_load_sensor" in hass.data[DOMAIN]:
@@ -806,16 +572,6 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
                 state.is_on,
             )
 
-        # Adjust load throttling
-        if config.can_throttle:
-            _LOGGER.debug(
-                "Throttle check for %s: can_throttle=%s, state.is_on_load_control=%s, new_plan.is_on=%s",
-                load_name,
-                config.can_throttle,
-                state.is_on_load_control,
-                new_plan.is_on,
-            )
-
         if (
             config.can_throttle and new_plan.is_on and config.throttle_amps_entity
         ):  # Removed is_on_load_control requirement
@@ -827,11 +583,11 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
                 )
             else:
                 # Make sure the delta is significant enough before issuing command
-                throttle_delta = previous_plan.throttle_amps - new_plan.throttle_amps
+                throttle_delta = state.current_load_amps - new_plan.throttle_amps
                 _LOGGER.debug(
                     "Throttle delta for %s: previous=%f, new=%f, delta=%f, hysteresis=%f",
                     load_name,
-                    previous_plan.throttle_amps,
+                    state.current_load_amps,
                     new_plan.throttle_amps,
                     abs(throttle_delta),
                     CONFIG.hysteresis_amps,
@@ -877,22 +633,16 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
                 else:
                     # Don't update the throttle due to hysteresis, but keep the new plan value
                     _LOGGER.debug(
-                        "Throttle unchanged for %s: delta %f <= hysteresis %f (keeping new plan value %f)",
+                        "Throttle unchanged for %s: delta %f <= hysteresis %f",
                         load_name,
                         abs(throttle_delta),
                         CONFIG.hysteresis_amps,
-                        new_plan.throttle_amps,
                     )
         elif config.can_throttle:
             _LOGGER.debug(
                 "Skipping throttle for %s: new_plan.is_on=%s", load_name, new_plan.is_on
             )
 
-        # Update expected consumption tracking for reactive reallocation
-        if CONFIG.enable_reactive_reallocation:
-            # Update expected consumption in state for variance tracking
-            state.expected_load_amps = new_plan.expected_load_amps
-            state.last_expected_update = now
         PLAN.available_amps = plan.available_amps
         PLAN.used_amps = plan.used_amps
         # Deep copy the controllable loads to avoid reference sharing between PLAN and new_plan

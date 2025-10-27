@@ -1,0 +1,6 @@
+# Describes the services available for the ZeroGrid integration
+
+recalculate_load_control:
+  name: Recalculate load control
+  description: Manually triggers a recalculation of the load control plan and immediately executes any necessary changes to controllable loads.
+  fields: {}

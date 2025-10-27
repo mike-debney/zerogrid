@@ -27,7 +27,7 @@ class Config:
     solar_generation_kw_entity: str | None = None
     allow_solar_consumption: bool = False
     controllable_loads: dict[str, ControllableLoadConfig] = {}
-
+    enable_automatic_recalculation: bool = True
     enable_reactive_reallocation: bool = True
     # Minimum variance in amps to trigger reallocation
     variance_detection_threshold: float = 1.0

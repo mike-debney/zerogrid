@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from . import STATE, recalculate_load_control
+from . import CONFIG, STATE, recalculate_load_control
 from .const import ALLOW_GRID_IMPORT_SWITCH_ID, DOMAIN, ENABLE_LOAD_CONTROL_SWITCH_ID
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,7 +65,8 @@ class EnableLoadControlSwitch(SwitchEntity):
         """Update the integration's STATE and trigger recalculation."""
         if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
             STATE.enable_load_control = self._attr_is_on
-            await recalculate_load_control(self.hass)
+            if CONFIG.enable_automatic_recalculation:
+                await recalculate_load_control(self.hass)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
@@ -116,7 +117,8 @@ class AllowGridImportSwitch(SwitchEntity):
         """Update the integration's STATE and trigger recalculation."""
         if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
             STATE.allow_grid_import = self._attr_is_on
-            await recalculate_load_control(self.hass)
+            if CONFIG.enable_automatic_recalculation:
+                await recalculate_load_control(self.hass)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Allow grid import."""
