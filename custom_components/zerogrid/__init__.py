@@ -81,6 +81,9 @@ def parse_config(domain_config):
     CONFIG.recalculate_interval_seconds = domain_config.get(
         "recalculate_interval_seconds", 10
     )
+    CONFIG.enable_automatic_recalculation = domain_config.get(
+        "enable_automatic_recalculation", True
+    )
     CONFIG.house_consumption_amps_entity = domain_config.get(
         "house_consumption_amps_entity", None
     )
@@ -90,20 +93,6 @@ def parse_config(domain_config):
         "solar_generation_kw_entity", None
     )
     CONFIG.allow_solar_consumption = CONFIG.solar_generation_kw_entity is not None
-
-    # Reactive power management settings
-    CONFIG.variance_detection_threshold = domain_config.get(
-        "variance_detection_threshold", 1.0
-    )
-    CONFIG.variance_detection_delay_seconds = domain_config.get(
-        "variance_detection_delay_seconds", 30
-    )
-    CONFIG.enable_reactive_reallocation = domain_config.get(
-        "enable_reactive_reallocation", True
-    )
-    CONFIG.enable_automatic_recalculation = domain_config.get(
-        "enable_automatic_recalculation", True
-    )
 
     control_options = domain_config.get("controllable_loads", [])
     for priority, control in enumerate(control_options):
@@ -275,7 +264,7 @@ async def calculate_effective_available_power(
     hass: HomeAssistant,
 ) -> tuple[float, float]:
     """Calculate available power including power freed by underperforming loads."""
-    max_safe_total_load_amps = CONFIG.safety_margin_amps
+    max_safe_total_load_amps = 0
 
     # Allow grid import
     grid_maximum_amps = 0.0
@@ -312,13 +301,16 @@ async def calculate_effective_available_power(
     # Update entities instead of setting state directly
     if DOMAIN in hass.data and "available_load_sensor" in hass.data[DOMAIN]:
         hass.data[DOMAIN]["available_load_sensor"].update_value(total_available_amps)
+    _LOGGER.debug("Available load for planning: %gA", total_available_amps)
     if DOMAIN in hass.data and "uncontrolled_load_sensor" in hass.data[DOMAIN]:
         hass.data[DOMAIN]["uncontrolled_load_sensor"].update_value(
             total_load_not_under_control
         )
     if DOMAIN in hass.data and "max_safe_load_sensor" in hass.data[DOMAIN]:
         hass.data[DOMAIN]["max_safe_load_sensor"].update_value(max_safe_total_load_amps)
-    _LOGGER.debug("Available load for planning: %gA", total_available_amps)
+    max_safe_total_load_amps += (
+        CONFIG.safety_margin_amps
+    )  # Add safety margin for overload
 
     return total_available_amps, max_safe_total_load_amps
 
