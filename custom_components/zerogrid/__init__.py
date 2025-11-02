@@ -87,12 +87,15 @@ def parse_config(domain_config):
     CONFIG.house_consumption_amps_entity = domain_config.get(
         "house_consumption_amps_entity", None
     )
-    CONFIG.mains_voltage_entity = domain_config.get("mains_voltage_entity")
 
+    CONFIG.mains_voltage_entity = domain_config.get("mains_voltage_entity")
     CONFIG.solar_generation_kw_entity = domain_config.get(
         "solar_generation_kw_entity", None
     )
-    CONFIG.allow_solar_consumption = CONFIG.solar_generation_kw_entity is not None
+    CONFIG.allow_solar_consumption = (
+        CONFIG.mains_voltage_entity is not None
+        and CONFIG.solar_generation_kw_entity is not None
+    )
 
     control_options = domain_config.get("controllable_loads", [])
     for priority, control in enumerate(control_options):
@@ -161,7 +164,9 @@ def initialise_state(hass: HomeAssistant):
         switch_state = hass.states.get(config.switch_entity)
         if switch_state is not None:
             load_state.is_on = switch_state.state.lower() == "on"
-            load_state.is_on_load_control = load_state.is_on # Assume under control initially
+            load_state.is_on_load_control = (
+                load_state.is_on
+            )  # Assume under control initially
 
         load_amps_state = hass.states.get(config.load_amps_entity)
         if load_amps_state is not None:
@@ -275,7 +280,7 @@ async def calculate_effective_available_power(
 
     # Convert solar generation to amps
     solar_generation_amps = 0.0
-    if STATE.solar_generation_kw > 0:
+    if CONFIG.allow_solar_consumption and STATE.solar_generation_kw > 0:
         solar_generation_amps = (STATE.solar_generation_kw * 1000) / STATE.mains_voltage
         solar_generation_amps = min(
             solar_generation_amps, CONFIG.max_solar_generation_amps

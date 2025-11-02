@@ -53,8 +53,8 @@ Install via HACS or manually copy the `custom_components/zerogrid` directory to 
 | Option | Required | Description |
 |--------|----------|-------------|
 | `house_consumption_amps_entity` | Yes | Sensor measuring total house consumption in amps |
-| `mains_voltage_entity` | Yes | Sensor measuring mains voltage |
 | `solar_generation_kw_entity` | No | Sensor measuring solar generation in kW, if this is omitted solar production will not be used |
+| `mains_voltage_entity` | No | Sensor measuring mains voltage, if this is omitted solar production will not be used |
 
 #### Controllable Loads
 Each controllable load has the following configuration:
