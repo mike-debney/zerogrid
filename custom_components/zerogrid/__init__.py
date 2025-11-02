@@ -452,7 +452,7 @@ async def recalculate_load_control(hass: HomeAssistant):
             available_amps += previously_allocated_amps - will_consume_amps
             plan.expected_load_amps = will_consume_amps
             plan.throttle_amps = will_consume_amps
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Planning to throttle load %s to %gA", load_name, will_consume_amps
             )
 
