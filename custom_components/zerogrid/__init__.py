@@ -273,13 +273,15 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
 
 
 @bind_hass
-async def calculate_effective_available_power() -> float:
+async def calculate_effective_available_power() -> tuple[float, float]:
     """Calculate available power including power freed by underperforming loads."""
+    max_safe_total_load_amps = CONFIG.safety_margin_amps
 
     # Allow grid import
     grid_maximum_amps = 0.0
     if STATE.allow_grid_import:
         grid_maximum_amps = CONFIG.max_grid_import_amps
+        max_safe_total_load_amps += CONFIG.max_grid_import_amps
 
     # Convert solar generation to amps
     solar_generation_amps = 0.0
@@ -288,6 +290,7 @@ async def calculate_effective_available_power() -> float:
         solar_generation_amps = min(
             solar_generation_amps, CONFIG.max_solar_generation_amps
         )
+        max_safe_total_load_amps += CONFIG.max_solar_generation_amps
 
     # Subtract loads that are under load control, since we can manage those
     total_load_not_under_control = STATE.house_consumption_amps
@@ -305,7 +308,7 @@ async def calculate_effective_available_power() -> float:
         "Total load available for planning: %g A",
         total_available_amps,
     )
-    return total_available_amps
+    return total_available_amps, max_safe_total_load_amps
 
 
 @bind_hass
@@ -336,7 +339,10 @@ async def recalculate_load_control(hass: HomeAssistant):
     new_plan = PlanState()
 
     # Calculate effective available power, loads that we are controlling are included
-    available_amps = await calculate_effective_available_power()
+    (
+        available_amps,
+        max_safe_total_load_amps,
+    ) = await calculate_effective_available_power()
     new_plan.available_amps = available_amps
 
     # Update entities instead of setting state directly
@@ -451,15 +457,12 @@ async def recalculate_load_control(hass: HomeAssistant):
             )
 
     # Third pass to immediately cut loads if we are overloaded
-    overload = (
-        available_amps < CONFIG.safety_margin_amps * -1
-        or STATE.house_consumption_amps >= CONFIG.max_total_load_amps
-    )
+    overload = STATE.house_consumption_amps >= max_safe_total_load_amps
     if overload:
         _LOGGER.warning(
             "Overload detected (consumption: %gA, max: %gA, available: %gA), cutting loads in reverse priority",
             STATE.house_consumption_amps,
-            CONFIG.max_total_load_amps,
+            max_safe_total_load_amps,
             available_amps,
         )
         for load_name in reversed(prioritised_loads):
