@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
@@ -12,7 +11,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from . import CONFIG, STATE, recalculate_load_control
-from .const import ALLOW_GRID_IMPORT_SWITCH_ID, DOMAIN, ENABLE_LOAD_CONTROL_SWITCH_ID
+from .const import (
+    ALLOW_GRID_IMPORT_SWITCH_ID,
+    DEVICE_INFO,
+    DOMAIN,
+    ENABLE_LOAD_CONTROL_SWITCH_ID,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +53,7 @@ class EnableLoadControlSwitch(SwitchEntity):
         self._attr_name = "Enable load control"
         self._attr_unique_id = ENABLE_LOAD_CONTROL_SWITCH_ID
         self._attr_is_on = True
+        self._attr_device_info = DEVICE_INFO
 
     async def async_added_to_hass(self) -> None:
         """Handle entity being added to hass."""
@@ -101,6 +106,7 @@ class AllowGridImportSwitch(SwitchEntity):
         self._attr_name = "Allow grid import"
         self._attr_unique_id = ALLOW_GRID_IMPORT_SWITCH_ID
         self._attr_is_on = True
+        self._attr_device_info = DEVICE_INFO
 
     async def async_added_to_hass(self) -> None:
         """Handle entity being added to hass."""

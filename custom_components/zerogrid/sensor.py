@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from .const import DOMAIN
+from .const import DEVICE_INFO, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,6 +59,7 @@ class AvailableAmpsSensor(SensorEntity):
         self._attr_name = "Available load"
         self._attr_unique_id = f"{DOMAIN}_available_load"
         self._attr_native_value = 0.0
+        self._attr_device_info = DEVICE_INFO
 
     @callback
     def update_value(self, amps: float) -> None:
@@ -80,6 +81,7 @@ class LoadControlAmpsSensor(SensorEntity):
         self._attr_name = "Controlled load"
         self._attr_unique_id = f"{DOMAIN}_controlled_load"
         self._attr_native_value = 0.0
+        self._attr_device_info = DEVICE_INFO
 
     @callback
     def update_value(self, amps: float) -> None:
@@ -101,6 +103,7 @@ class UncontrolledLoadAmpsSensor(SensorEntity):
         self._attr_name = "Uncontrolled load"
         self._attr_unique_id = f"{DOMAIN}_uncontrolled_load"
         self._attr_native_value = 0.0
+        self._attr_device_info = DEVICE_INFO
 
     @callback
     def update_value(self, amps: float) -> None:
@@ -122,6 +125,7 @@ class MaxSafeLoadAmpsSensor(SensorEntity):
         self._attr_name = "Max safe load"
         self._attr_unique_id = f"{DOMAIN}_max_safe_load"
         self._attr_native_value = 0.0
+        self._attr_device_info = DEVICE_INFO
 
     @callback
     def update_value(self, amps: float) -> None:

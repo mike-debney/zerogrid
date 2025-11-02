@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from .const import DOMAIN
+from .const import DEVICE_INFO, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ class OverloadBinarySensor(BinarySensorEntity):
         self._attr_name = "Overload"
         self._attr_unique_id = f"{DOMAIN}_overload"
         self._attr_is_on = False
+        self._attr_device_info = DEVICE_INFO
 
     @callback
     def update_state(self, is_overload: bool) -> None:
