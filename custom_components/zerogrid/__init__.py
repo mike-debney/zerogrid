@@ -161,6 +161,7 @@ def initialise_state(hass: HomeAssistant):
         switch_state = hass.states.get(config.switch_entity)
         if switch_state is not None:
             load_state.is_on = switch_state.state.lower() == "on"
+            load_state.is_on_load_control = load_state.is_on # Assume under control initially
 
         load_amps_state = hass.states.get(config.load_amps_entity)
         if load_amps_state is not None:
