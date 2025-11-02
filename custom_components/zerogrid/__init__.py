@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
-import math
 
 from homeassistant.const import Platform
 from homeassistant.core import Event, HomeAssistant
@@ -74,7 +73,8 @@ def parse_config(domain_config):
         CONFIG.max_grid_import_amps + CONFIG.max_solar_generation_amps,
     )
 
-    CONFIG.hysteresis_amps = domain_config.get("hysteresis_amps", 1)
+    CONFIG.safety_margin_amps = domain_config.get("safety_margin_amps", 5.0)
+    CONFIG.hysteresis_amps = domain_config.get("hysteresis_amps", 1.0)
     CONFIG.recalculate_interval_seconds = domain_config.get(
         "recalculate_interval_seconds", 10
     )
@@ -449,7 +449,7 @@ async def recalculate_load_control(hass: HomeAssistant):
                 available_amps + previously_allocated_amps,
                 config.max_controllable_load_amps,
             )
-            will_consume_amps = math.floor(will_consume_amps)
+            will_consume_amps = round(will_consume_amps)
 
             available_amps += previously_allocated_amps - will_consume_amps
             plan.expected_load_amps = will_consume_amps
@@ -461,27 +461,34 @@ async def recalculate_load_control(hass: HomeAssistant):
     # Third pass to immediately cut loads if we are overloaded
     overload = STATE.house_consumption_amps >= max_safe_total_load_amps
     if overload:
-        _LOGGER.warning(
-            "Overload detected (consumption: %gA, max: %gA, available: %gA), cutting loads in reverse priority",
-            STATE.house_consumption_amps,
-            max_safe_total_load_amps,
-            available_amps,
-        )
-        for load_name in reversed(prioritised_loads):
-            plan = new_plan.controllable_loads[load_name]
-            state = STATE.controllable_loads[load_name]
-            if not plan.is_on or not state.is_on_load_control:
-                continue  # Load will already be off or out of our control
+        if STATE.last_overload is None:
+            STATE.last_overload = now
+        if now >= STATE.last_overload + timedelta(
+            seconds=CONFIG.recalculate_interval_seconds * 3
+        ):
+            _LOGGER.warning(
+                "Overload detected (consumption: %gA, max: %gA, available: %gA), cutting loads in reverse priority",
+                STATE.house_consumption_amps,
+                max_safe_total_load_amps,
+                available_amps,
+            )
+            for load_name in reversed(prioritised_loads):
+                plan = new_plan.controllable_loads[load_name]
+                state = STATE.controllable_loads[load_name]
+                if not plan.is_on or not state.is_on_load_control:
+                    continue  # Load will already be off or out of our control
 
-            plan.is_on = False
-            available_amps += plan.expected_load_amps
-            plan.expected_load_amps = 0.0
-            plan.throttle_amps = 0.0
-            _LOGGER.info("Cutting load %s to reduce overload", load_name)
+                plan.is_on = False
+                available_amps += plan.expected_load_amps
+                plan.expected_load_amps = 0.0
+                plan.throttle_amps = 0.0
+                _LOGGER.info("Cutting load %s to reduce overload", load_name)
 
-            # Check if we are still overloaded
-            if available_amps >= 0:
-                break
+                # Check if we are still overloaded
+                if available_amps >= 0:
+                    break
+    else:
+        STATE.last_overload = None
 
     # Final pass to summarise plan
     new_plan.available_amps = available_amps

@@ -51,3 +51,4 @@ class State:
         self.enable_load_control: bool = False
         self.solar_generation_kw: float = 0.0
         self.controllable_loads: dict[str, ControllableLoadState] = {}
+        self.last_overload: datetime | None = None
