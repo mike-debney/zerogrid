@@ -23,7 +23,7 @@ from .state import ControllableLoadPlanState, ControllableLoadState, PlanState, 
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
 
 CONFIG = Config()
 STATE = State()
@@ -50,6 +50,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     )
 
     # Set up platforms
+    hass.async_create_task(
+        async_load_platform(hass, Platform.BINARY_SENSOR, DOMAIN, {}, config)
+    )
     hass.async_create_task(
         async_load_platform(hass, Platform.SENSOR, DOMAIN, {}, config)
     )
@@ -268,7 +271,9 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
 
 
 @bind_hass
-async def calculate_effective_available_power() -> tuple[float, float]:
+async def calculate_effective_available_power(
+    hass: HomeAssistant,
+) -> tuple[float, float]:
     """Calculate available power including power freed by underperforming loads."""
     max_safe_total_load_amps = CONFIG.safety_margin_amps
 
@@ -303,6 +308,18 @@ async def calculate_effective_available_power() -> tuple[float, float]:
         "Total load available for planning: %g A",
         total_available_amps,
     )
+
+    # Update entities instead of setting state directly
+    if DOMAIN in hass.data and "available_load_sensor" in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["available_load_sensor"].update_value(total_available_amps)
+    if DOMAIN in hass.data and "uncontrolled_load_sensor" in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["uncontrolled_load_sensor"].update_value(
+            total_load_not_under_control
+        )
+    if DOMAIN in hass.data and "max_safe_load_sensor" in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["max_safe_load_sensor"].update_value(max_safe_total_load_amps)
+    _LOGGER.debug("Available load for planning: %gA", total_available_amps)
+
     return total_available_amps, max_safe_total_load_amps
 
 
@@ -344,14 +361,8 @@ async def recalculate_load_control(hass: HomeAssistant):
     (
         available_amps,
         max_safe_total_load_amps,
-    ) = await calculate_effective_available_power()
+    ) = await calculate_effective_available_power(hass)
     new_plan.available_amps = available_amps
-
-    # Update entities instead of setting state directly
-    if DOMAIN in hass.data and "available_load_sensor" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["available_load_sensor"].update_value(available_amps)
-
-    _LOGGER.debug("Available load for planning: %gA", available_amps)
 
     # Build priority list (lower number == more important)
     prioritised_loads = sorted(
@@ -459,13 +470,14 @@ async def recalculate_load_control(hass: HomeAssistant):
             )
 
     # Third pass to immediately cut loads if we are overloaded
-    overload = STATE.house_consumption_amps >= max_safe_total_load_amps
-    if overload:
+    overload = False
+    if STATE.house_consumption_amps >= max_safe_total_load_amps:
         if STATE.last_overload is None:
             STATE.last_overload = now
         if now >= STATE.last_overload + timedelta(
             seconds=CONFIG.recalculate_interval_seconds * 3
         ):
+            overload = True
             _LOGGER.warning(
                 "Overload detected (consumption: %gA, max: %gA, available: %gA), cutting loads in reverse priority",
                 STATE.house_consumption_amps,
@@ -489,6 +501,10 @@ async def recalculate_load_control(hass: HomeAssistant):
                     break
     else:
         STATE.last_overload = None
+
+    # Update overload binary sensor
+    if DOMAIN in hass.data and "overload_sensor" in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["overload_sensor"].update_state(overload)
 
     # Final pass to summarise plan
     new_plan.available_amps = available_amps

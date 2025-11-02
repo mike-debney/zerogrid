@@ -26,13 +26,24 @@ async def async_setup_platform(
 
     available_load_sensor = AvailableAmpsSensor()
     controlled_load_sensor = LoadControlAmpsSensor()
+    uncontrolled_load_sensor = UncontrolledLoadAmpsSensor()
+    max_safe_load_sensor = MaxSafeLoadAmpsSensor()
 
     # Store references in hass.data for updates
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN]["available_load_sensor"] = available_load_sensor
     hass.data[DOMAIN]["controlled_load_sensor"] = controlled_load_sensor
+    hass.data[DOMAIN]["uncontrolled_load_sensor"] = uncontrolled_load_sensor
+    hass.data[DOMAIN]["max_safe_load_sensor"] = max_safe_load_sensor
 
-    async_add_entities([available_load_sensor, controlled_load_sensor])
+    async_add_entities(
+        [
+            available_load_sensor,
+            controlled_load_sensor,
+            uncontrolled_load_sensor,
+            max_safe_load_sensor,
+        ]
+    )
 
 
 class AvailableAmpsSensor(SensorEntity):
@@ -68,6 +79,48 @@ class LoadControlAmpsSensor(SensorEntity):
         """Initialize the sensor."""
         self._attr_name = "Controlled load"
         self._attr_unique_id = f"{DOMAIN}_controlled_load"
+        self._attr_native_value = 0.0
+
+    @callback
+    def update_value(self, amps: float) -> None:
+        """Update the sensor value and notify HA."""
+        self._attr_native_value = round(amps, 2)
+        self.async_write_ha_state()
+
+
+class UncontrolledLoadAmpsSensor(SensorEntity):
+    """Sensor for total current not under load control."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_should_poll = False
+
+    def __init__(self) -> None:
+        """Initialize the sensor."""
+        self._attr_name = "Uncontrolled load"
+        self._attr_unique_id = f"{DOMAIN}_uncontrolled_load"
+        self._attr_native_value = 0.0
+
+    @callback
+    def update_value(self, amps: float) -> None:
+        """Update the sensor value and notify HA."""
+        self._attr_native_value = round(amps, 2)
+        self.async_write_ha_state()
+
+
+class MaxSafeLoadAmpsSensor(SensorEntity):
+    """Sensor for maximum safe total load current."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_should_poll = False
+
+    def __init__(self) -> None:
+        """Initialize the sensor."""
+        self._attr_name = "Max safe load"
+        self._attr_unique_id = f"{DOMAIN}_max_safe_load"
         self._attr_native_value = 0.0
 
     @callback
