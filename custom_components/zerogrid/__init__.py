@@ -320,7 +320,9 @@ async def calculate_effective_available_power(
         load_state = STATE.controllable_loads[load_name]
         if load_state.is_on_load_control and load_state.is_on:
             total_load_not_under_control -= load_state.current_load_amps
-        _LOGGER.debug("Load %s drawing %gA", load_name, load_state.current_load_amps)
+            _LOGGER.debug(
+                "Load %s drawing %gA", load_name, load_state.current_load_amps
+            )
 
     total_available_amps = (
         grid_maximum_amps + solar_generation_amps - max(total_load_not_under_control, 0)
