@@ -293,6 +293,7 @@ async def calculate_effective_available_power(
         load_state = STATE.controllable_loads[load_name]
         if load_state.is_on_load_control and load_state.is_on:
             total_load_not_under_control -= load_state.current_load_amps
+        _LOGGER.debug("Load %s drawing %gA", load_name, load_state.current_load_amps)
 
     total_available_amps = (
         grid_maximum_amps + solar_generation_amps - max(total_load_not_under_control, 0)
@@ -300,23 +301,19 @@ async def calculate_effective_available_power(
     # Safety cap to maximum total available load
     total_available_amps = min(total_available_amps, CONFIG.max_total_load_amps)
     _LOGGER.debug(
-        "Total load available for planning: %g A",
+        "Total load available for load control: %gA",
         total_available_amps,
     )
 
     # Update entities instead of setting state directly
     if DOMAIN in hass.data and "available_load_sensor" in hass.data[DOMAIN]:
         hass.data[DOMAIN]["available_load_sensor"].update_value(total_available_amps)
-    _LOGGER.debug("Available load for planning: %gA", total_available_amps)
     if DOMAIN in hass.data and "uncontrolled_load_sensor" in hass.data[DOMAIN]:
         hass.data[DOMAIN]["uncontrolled_load_sensor"].update_value(
             total_load_not_under_control
         )
     if DOMAIN in hass.data and "max_safe_load_sensor" in hass.data[DOMAIN]:
         hass.data[DOMAIN]["max_safe_load_sensor"].update_value(max_safe_total_load_amps)
-    max_safe_total_load_amps += (
-        CONFIG.safety_margin_amps
-    )  # Add safety margin for overload
 
     return total_available_amps, max_safe_total_load_amps
 
@@ -330,6 +327,10 @@ async def recalculate_load_control(hass: HomeAssistant):
     overload protection, and reactive reallocation.
     """
     _LOGGER.info("Recalculating load control plan")
+
+    # Clear safety abort state if we're recalculating (system has recovered)
+    if DOMAIN in hass.data and "safety_abort_sensor" in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["safety_abort_sensor"].update_state(False)
 
     # Check if load control is enabled
     if DOMAIN in hass.data and ENABLE_LOAD_CONTROL_SWITCH_ID in hass.data[DOMAIN]:
@@ -469,7 +470,7 @@ async def recalculate_load_control(hass: HomeAssistant):
 
     # Third pass to immediately cut loads if we are overloaded
     overload = False
-    if STATE.house_consumption_amps >= max_safe_total_load_amps:
+    if STATE.house_consumption_amps >= max_safe_total_load_amps + CONFIG.safety_margin_amps:
         if STATE.last_overload is None:
             STATE.last_overload = now
         if now >= STATE.last_overload + timedelta(
@@ -650,6 +651,10 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
 async def safety_abort(hass: HomeAssistant):
     """Cuts all load controlled by the integration in a safety situation."""
     _LOGGER.error("Aborting load control, cutting all loads")
+
+    # Update safety abort binary sensor
+    if DOMAIN in hass.data and "safety_abort_sensor" in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["safety_abort_sensor"].update_state(True)
 
     if DOMAIN in hass.data and "enable_load_control" in hass.data[DOMAIN]:
         hass.data[DOMAIN]["enable_load_control"].update_value(False)

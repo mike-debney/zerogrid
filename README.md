@@ -125,5 +125,6 @@ ZeroGrid creates the following entities that indicate how the system is performi
 | `sensor.zerogrid_uncontrolled_load` | Power used by loads not under ZeroGrid control (amps). Calculated as total house consumption minus controlled loads. |
 | `sensor.zerogrid_max_safe_load` | Maximum safe total load (amps). Calculated from configured limits plus safety margin. |
 | `binary_sensor.zerogrid_overload` | Indicates if the system is in an overload state (on = overload detected). |
+| `binary_sensor.zerogrid_safety_abort` | Indicates if a safety abort has occurred (on = critical sensor unavailable, all loads cut). Clears automatically when system recovers. |
 | `switch.zerogrid_enable_load_control` | Master enable/disable for load control. When off, no loads will be automatically controlled. Cycling this also resets any throttling timers. |
 | `switch.zerogrid_allow_grid_import` | Enable/disable grid import. When off, only solar power can be used for controllable loads. |

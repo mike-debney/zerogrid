@@ -27,12 +27,14 @@ async def async_setup_platform(
     _LOGGER.debug("Setting up ZeroGrid binary sensor platform")
 
     overload_sensor = OverloadBinarySensor()
+    safety_abort_sensor = SafetyAbortBinarySensor()
 
     # Store reference in hass.data for updates
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN]["overload_sensor"] = overload_sensor
+    hass.data[DOMAIN]["safety_abort_sensor"] = safety_abort_sensor
 
-    async_add_entities([overload_sensor])
+    async_add_entities([overload_sensor, safety_abort_sensor])
 
 
 class OverloadBinarySensor(BinarySensorEntity):
@@ -53,4 +55,25 @@ class OverloadBinarySensor(BinarySensorEntity):
     def update_state(self, is_overload: bool) -> None:
         """Update the binary sensor state and notify HA."""
         self._attr_is_on = is_overload
+        self.async_write_ha_state()
+
+
+class SafetyAbortBinarySensor(BinarySensorEntity):
+    """Binary sensor indicating safety abort state."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_should_poll = False
+
+    def __init__(self) -> None:
+        """Initialize the binary sensor."""
+        self._attr_name = "Safety abort"
+        self._attr_unique_id = f"{DOMAIN}_safety_abort"
+        self._attr_is_on = False
+        self._attr_device_info = DEVICE_INFO
+
+    @callback
+    def update_state(self, is_abort: bool) -> None:
+        """Update the binary sensor state and notify HA."""
+        self._attr_is_on = is_abort
         self.async_write_ha_state()
