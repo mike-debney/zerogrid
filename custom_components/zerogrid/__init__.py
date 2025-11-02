@@ -417,7 +417,8 @@ async def recalculate_load_control(hass: HomeAssistant):
             > now
         )
         state.is_throttle_rate_limited = (
-            state.last_throttled is not None
+            config.can_throttle
+            and state.last_throttled is not None
             and state.last_throttled
             + timedelta(seconds=config.min_throttle_interval_seconds)
             > now
