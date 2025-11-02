@@ -176,7 +176,7 @@ def initialise_state(hass: HomeAssistant):
 
         STATE.controllable_loads[load_name] = load_state
         PLAN.controllable_loads[load_name] = ControllableLoadPlanState()
-        _LOGGER.error(
+        _LOGGER.debug(
             "Switch entity init for %s: %s",
             load_name,
             PLAN.controllable_loads[load_name].is_on,
@@ -242,24 +242,19 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
 
             # match to controllable loads
             for control in CONFIG.controllable_loads.values():
+                load = STATE.controllable_loads[control.name]
                 if entity_id == control.switch_entity:
                     if new_state is not None:
-                        STATE.controllable_loads[control.name].is_on = (
-                            new_state.state.lower() == "on"
-                        )
+                        load.is_on = new_state.state.lower() == "on"
                     else:
-                        STATE.controllable_loads[control.name].is_on = False
+                        load.is_on = False
 
                 if entity_id == control.load_amps_entity:
                     if new_state is not None:
-                        STATE.controllable_loads[
-                            control.name
-                        ].current_load_amps = float(new_state.state)
+                        load.current_load_amps = float(new_state.state)
                     else:
-                        STATE.controllable_loads[control.name].current_load_amps = 0.0
-                STATE.load_control_consumption_amps += STATE.controllable_loads[
-                    control.name
-                ].current_load_amps
+                        load.current_load_amps = 0.0
+                STATE.load_control_consumption_amps += load.current_load_amps
 
     async def state_time_listener(now: datetime) -> None:
         if CONFIG.enable_automatic_recalculation:
@@ -328,6 +323,13 @@ async def recalculate_load_control(hass: HomeAssistant):
         ].is_on
     if not STATE.enable_load_control:
         _LOGGER.debug("Load control is disabled, skipping recalculation")
+
+        # Reset load state
+        for control in CONFIG.controllable_loads.values():
+            load = STATE.controllable_loads[control.name]
+            load.is_on_load_control = True
+            load.last_throttled = None
+            load.last_toggled = None
         return
 
     # Check if allow grid import is enabled
@@ -645,5 +647,17 @@ async def safety_abort(hass: HomeAssistant):
                 {"entity_id": config.switch_entity},
                 blocking=True,
             )
+
+            state = STATE.controllable_loads[load_name]
+            state.is_on = False
+            state.is_on_load_control = False
+            state.last_toggled = datetime.now()
+            state.last_throttled = datetime.now()
+
+            load_plan = plan.controllable_loads[load_name] = ControllableLoadPlanState()
+            load_plan.is_on = False
+            load_plan.expected_load_amps = 0.0
+            load_plan.throttle_amps = 0.0
+            _LOGGER.info("Turned off load %s for safety", config.switch_entity)
         except (ValueError, KeyError, RuntimeError) as err:
             _LOGGER.error("Failed to turn off %s: %s", config.switch_entity, err)
