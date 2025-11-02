@@ -19,7 +19,10 @@ class ControllableLoadConfig:
 class Config:
     """Configuration for Zero Grid integration."""
 
-    max_house_load_amps: float
+    max_total_load_amps: float
+    max_grid_import_amps: float
+    max_solar_generation_amps: float
+    safety_margin_amps: int = 10
     hysteresis_amps: float
     recalculate_interval_seconds: int = 10
     house_consumption_amps_entity: str
