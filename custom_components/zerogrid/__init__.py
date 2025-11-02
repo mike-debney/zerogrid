@@ -127,31 +127,37 @@ def initialise_state(hass: HomeAssistant):
     """Initialises the state of the integration."""
     if CONFIG.house_consumption_amps_entity is not None:
         state = hass.states.get(CONFIG.house_consumption_amps_entity)
-        if state is not None:
+        if state is not None and state.state not in ("unknown", "unavailable"):
             STATE.house_consumption_amps = float(state.state)
 
     if CONFIG.mains_voltage_entity is not None:
         state = hass.states.get(CONFIG.mains_voltage_entity)
-        if state is not None:
+        if state is not None and state.state not in ("unknown", "unavailable"):
             STATE.mains_voltage = float(state.state)
 
     if CONFIG.solar_generation_kw_entity is not None:
         state = hass.states.get(CONFIG.solar_generation_kw_entity)
-        if state is not None:
+        if state is not None and state.state not in ("unknown", "unavailable"):
             STATE.solar_generation_kw = float(state.state)
     else:
         STATE.solar_generation_kw = 0.0
 
     # Initialize allow_grid_import from switch entity (will be set up by platform)
     grid_import_state = hass.states.get(ALLOW_GRID_IMPORT_SWITCH_ID)
-    if grid_import_state is not None:
+    if grid_import_state is not None and grid_import_state.state not in (
+        "unknown",
+        "unavailable",
+    ):
         STATE.allow_grid_import = grid_import_state.state.lower() == "on"
     else:
         STATE.allow_grid_import = False  # Default to safe state
 
     # Initialize enable_load_control from switch entity (will be set up by platform)
     load_control_state = hass.states.get(ENABLE_LOAD_CONTROL_SWITCH_ID)
-    if load_control_state is not None:
+    if load_control_state is not None and load_control_state.state not in (
+        "unknown",
+        "unavailable",
+    ):
         STATE.enable_load_control = load_control_state.state.lower() == "on"
     else:
         STATE.enable_load_control = False  # Default to safe state
@@ -162,14 +168,20 @@ def initialise_state(hass: HomeAssistant):
         load_state = ControllableLoadState()
 
         switch_state = hass.states.get(config.switch_entity)
-        if switch_state is not None:
+        if switch_state is not None and switch_state.state not in (
+            "unknown",
+            "unavailable",
+        ):
             load_state.is_on = switch_state.state.lower() == "on"
             load_state.is_on_load_control = (
                 load_state.is_on
             )  # Assume under control initially
 
         load_amps_state = hass.states.get(config.load_amps_entity)
-        if load_amps_state is not None:
+        if load_amps_state is not None and load_amps_state.state not in (
+            "unknown",
+            "unavailable",
+        ):
             load_state.current_load_amps = float(load_amps_state.state)
 
         STATE.controllable_loads[load_name] = load_state
@@ -208,7 +220,10 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
             return
 
         if entity_id == CONFIG.house_consumption_amps_entity:
-            if new_state is not None:
+            if new_state is not None and new_state.state not in (
+                "unknown",
+                "unavailable",
+            ):
                 STATE.house_consumption_amps = float(new_state.state)
             else:
                 _LOGGER.error(
@@ -218,7 +233,10 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                 return
 
         elif entity_id == CONFIG.mains_voltage_entity:
-            if new_state is not None:
+            if new_state is not None and new_state.state not in (
+                "unknown",
+                "unavailable",
+            ):
                 STATE.mains_voltage = float(new_state.state)
             else:
                 _LOGGER.error(
@@ -228,7 +246,10 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                 return
 
         elif entity_id == CONFIG.solar_generation_kw_entity:
-            if new_state is not None:
+            if new_state is not None and new_state.state not in (
+                "unknown",
+                "unavailable",
+            ):
                 STATE.solar_generation_kw = float(new_state.state)
             else:
                 STATE.solar_generation_kw = 0.0
@@ -242,13 +263,19 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
             for control in CONFIG.controllable_loads.values():
                 load = STATE.controllable_loads[control.name]
                 if entity_id == control.switch_entity:
-                    if new_state is not None:
+                    if new_state is not None and new_state.state not in (
+                        "unknown",
+                        "unavailable",
+                    ):
                         load.is_on = new_state.state.lower() == "on"
                     else:
                         load.is_on = False
 
                 if entity_id == control.load_amps_entity:
-                    if new_state is not None:
+                    if new_state is not None and new_state.state not in (
+                        "unknown",
+                        "unavailable",
+                    ):
                         load.current_load_amps = float(new_state.state)
                     else:
                         load.current_load_amps = 0.0
@@ -328,10 +355,6 @@ async def recalculate_load_control(hass: HomeAssistant):
     """
     _LOGGER.info("Recalculating load control plan")
 
-    # Clear safety abort state if we're recalculating (system has recovered)
-    if DOMAIN in hass.data and "safety_abort_sensor" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["safety_abort_sensor"].update_state(False)
-
     # Check if load control is enabled
     if DOMAIN in hass.data and ENABLE_LOAD_CONTROL_SWITCH_ID in hass.data[DOMAIN]:
         STATE.enable_load_control = hass.data[DOMAIN][
@@ -347,6 +370,10 @@ async def recalculate_load_control(hass: HomeAssistant):
             load.last_throttled = None
             load.last_toggled = None
         return
+
+    # Clear safety abort state if system has recovered
+    if DOMAIN in hass.data and "safety_abort_sensor" in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["safety_abort_sensor"].update_state(False)
 
     # Check if allow grid import is enabled
     STATE.allow_grid_import = False
@@ -470,7 +497,10 @@ async def recalculate_load_control(hass: HomeAssistant):
 
     # Third pass to immediately cut loads if we are overloaded
     overload = False
-    if STATE.house_consumption_amps >= max_safe_total_load_amps + CONFIG.safety_margin_amps:
+    if (
+        STATE.house_consumption_amps
+        >= max_safe_total_load_amps + CONFIG.safety_margin_amps
+    ):
         if STATE.last_overload is None:
             STATE.last_overload = now
         if now >= STATE.last_overload + timedelta(
