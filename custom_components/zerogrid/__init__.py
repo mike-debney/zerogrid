@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 
-from homeassistant.const import STATE_ON, Platform
+from homeassistant.const import STATE_OFF, STATE_ON, Platform
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.discovery import async_load_platform
@@ -274,7 +274,7 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                         "unknown",
                         "unavailable",
                     ):
-                        load.is_on = new_state.state == STATE_ON
+                        load.is_on = new_state.state != STATE_OFF
                     else:
                         load.is_on = False
 
