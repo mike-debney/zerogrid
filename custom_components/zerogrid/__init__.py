@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 
-from homeassistant.const import Platform
+from homeassistant.const import Platform, STATE_ON
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers.discovery import async_load_platform
 from homeassistant.helpers.event import (
@@ -148,7 +148,7 @@ def initialise_state(hass: HomeAssistant):
         "unknown",
         "unavailable",
     ):
-        STATE.allow_grid_import = grid_import_state.state.lower() == "on"
+        STATE.allow_grid_import = grid_import_state.state == STATE_ON
     else:
         STATE.allow_grid_import = False  # Default to safe state
 
@@ -158,7 +158,7 @@ def initialise_state(hass: HomeAssistant):
         "unknown",
         "unavailable",
     ):
-        STATE.enable_load_control = load_control_state.state.lower() == "on"
+        STATE.enable_load_control = load_control_state.state == STATE_ON
     else:
         STATE.enable_load_control = False  # Default to safe state
 
@@ -172,7 +172,7 @@ def initialise_state(hass: HomeAssistant):
             "unknown",
             "unavailable",
         ):
-            load_state.is_on = switch_state.state.lower() == "on"
+            load_state.is_on = hass.states.is_state(config.switch_entity, STATE_ON)
             load_state.is_on_load_control = (
                 load_state.is_on
             )  # Assume under control initially
@@ -197,10 +197,12 @@ def initialise_state(hass: HomeAssistant):
 
 def subscribe_to_entity_changes(hass: HomeAssistant):
     """Subscribes to required entity changes."""
-    entity_ids: list[str] = [
-        CONFIG.house_consumption_amps_entity
-    ]
-    if CONFIG.allow_solar_consumption:
+    entity_ids: list[str] = [CONFIG.house_consumption_amps_entity]
+    if (
+        CONFIG.allow_solar_consumption
+        and CONFIG.solar_generation_kw_entity is not None
+        and CONFIG.mains_voltage_entity is not None
+    ):
         entity_ids.append(CONFIG.solar_generation_kw_entity)
         entity_ids.append(CONFIG.mains_voltage_entity)
 
@@ -225,6 +227,7 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                 "unavailable",
             ):
                 STATE.house_consumption_amps = float(new_state.state)
+                await recalculate_load_control(hass)
             else:
                 _LOGGER.error(
                     "House consumption entity is unavailable, cutting all load for safety"
@@ -263,11 +266,14 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
             for control in CONFIG.controllable_loads.values():
                 load = STATE.controllable_loads[control.name]
                 if entity_id == control.switch_entity:
+                    _LOGGER.debug(
+                        "Switch entity %s changed to %s", entity_id, new_state.state
+                    )
                     if new_state is not None and new_state.state not in (
                         "unknown",
                         "unavailable",
                     ):
-                        load.is_on = new_state.state.lower() == "on"
+                        load.is_on = new_state.state == STATE_ON
                     else:
                         load.is_on = False
 
@@ -283,12 +289,19 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
 
     async def state_time_listener(now: datetime) -> None:
         if CONFIG.enable_automatic_recalculation:
-            await recalculate_load_control(hass)
+            # Make sure we are recalculating at least the minimum interval
+            if (
+                STATE.last_recalculation is None
+                or STATE.last_recalculation
+                + timedelta(seconds=CONFIG.recalculate_interval_seconds)
+                < datetime.now()
+            ):
+                await recalculate_load_control(hass)
 
     _LOGGER.debug("Subscribing... %s", entity_ids)
     async_track_state_change_event(hass, entity_ids, state_automation_listener)
 
-    interval = timedelta(seconds=CONFIG.recalculate_interval_seconds)
+    interval = timedelta(seconds=1)
     async_track_time_interval(hass, state_time_listener, interval)
 
 
@@ -356,6 +369,8 @@ async def recalculate_load_control(hass: HomeAssistant):
     overload protection, and reactive reallocation.
     """
     _LOGGER.info("Recalculating load control plan")
+    now = datetime.now()
+    STATE.last_recalculation = now
 
     # Check if load control is enabled
     if DOMAIN in hass.data and ENABLE_LOAD_CONTROL_SWITCH_ID in hass.data[DOMAIN]:
@@ -382,7 +397,6 @@ async def recalculate_load_control(hass: HomeAssistant):
     if DOMAIN in hass.data and ALLOW_GRID_IMPORT_SWITCH_ID in hass.data[DOMAIN]:
         STATE.allow_grid_import = hass.data[DOMAIN][ALLOW_GRID_IMPORT_SWITCH_ID].is_on
 
-    now = datetime.now()
     new_plan = PlanState()
 
     # Calculate effective available power, loads that we are controlling are included
