@@ -76,7 +76,7 @@ def parse_config(domain_config):
         CONFIG.max_grid_import_amps + CONFIG.max_solar_generation_amps,
     )
 
-    CONFIG.safety_margin_amps = domain_config.get("safety_margin_amps", 5.0)
+    CONFIG.safety_margin_amps = domain_config.get("safety_margin_amps", 2.0)
     CONFIG.hysteresis_amps = domain_config.get("hysteresis_amps", 1.0)
     CONFIG.recalculate_interval_seconds = domain_config.get(
         "recalculate_interval_seconds", 10
@@ -198,11 +198,11 @@ def initialise_state(hass: HomeAssistant):
 def subscribe_to_entity_changes(hass: HomeAssistant):
     """Subscribes to required entity changes."""
     entity_ids: list[str] = [
-        CONFIG.house_consumption_amps_entity,
-        CONFIG.mains_voltage_entity,
+        CONFIG.house_consumption_amps_entity
     ]
-    if CONFIG.solar_generation_kw_entity is not None:
+    if CONFIG.allow_solar_consumption:
         entity_ids.append(CONFIG.solar_generation_kw_entity)
+        entity_ids.append(CONFIG.mains_voltage_entity)
 
     for control in CONFIG.controllable_loads.values():
         entity_ids.append(control.load_amps_entity)

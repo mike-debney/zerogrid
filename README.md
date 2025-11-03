@@ -83,13 +83,13 @@ zerogrid:
 
     # Required: Monitoring entities
     house_consumption_amps_entity: "sensor.house_consumption"
-    mains_voltage_entity: "sensor.mains_voltage"
 
     # Optional: Solar generation
     solar_generation_kw_entity: "sensor.solar_generation"
+    mains_voltage_entity: "sensor.mains_voltage"
 
     # Optional: Safety and timing
-    safety_margin_amps: 5.0          # Safety buffer below max load (default: 5.0)
+    safety_margin_amps: 2.0          # Safety buffer above max load before triggering overload protection (default: 2.0)
     hysteresis_amps: 1.0             # Prevents oscillation (default: 1.0)
     recalculate_interval_seconds: 10 # Periodic recalculation interval (default: 10)
   
@@ -97,22 +97,22 @@ zerogrid:
         # First load = highest priority
         # Non-throttleable: min = max (hot water heater is either fully on or off)
         - name: "hot_water_heater"
-            max_controllable_load_amps: 10
-            min_controllable_load_amps: 10
-            min_toggle_interval_seconds: 300
-            load_amps_entity: "sensor.hot_water_current"
-            switch_entity: "switch.hot_water_heater"
+          max_controllable_load_amps: 10
+          min_controllable_load_amps: 10
+          min_toggle_interval_seconds: 300
+          load_amps_entity: "sensor.hot_water_current"
+          switch_entity: "switch.hot_water_heater"
         
         # Second load = lower priority
         # Throttleable: min < max, includes throttle_amps_entity
         - name: "ev_charger"
-            max_controllable_load_amps: 16
-            min_controllable_load_amps: 6
-            min_toggle_interval_seconds: 60
-            min_throttle_interval_seconds: 30
-            load_amps_entity: "sensor.ev_charger_current"
-            switch_entity: "switch.ev_charger"
-            throttle_amps_entity: "number.ev_charger_max_current"
+          max_controllable_load_amps: 16
+          min_controllable_load_amps: 6
+          min_toggle_interval_seconds: 60
+          min_throttle_interval_seconds: 30
+          load_amps_entity: "sensor.ev_charger_current"
+          switch_entity: "switch.ev_charger"
+          throttle_amps_entity: "number.ev_charger_max_current"
 ```
 
 ## Entities

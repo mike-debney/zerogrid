@@ -22,7 +22,7 @@ class Config:
     max_total_load_amps: float
     max_grid_import_amps: float
     max_solar_generation_amps: float
-    safety_margin_amps: float = 5.0
+    safety_margin_amps: float = 2.0
     hysteresis_amps: float = 1.0
     recalculate_interval_seconds: int = 10
     house_consumption_amps_entity: str
