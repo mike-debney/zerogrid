@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 
-from homeassistant.const import Platform, STATE_ON
+from homeassistant.const import STATE_ON, Platform
 from homeassistant.core import Event, HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.discovery import async_load_platform
 from homeassistant.helpers.event import (
     EventStateChangedData,
@@ -612,7 +613,7 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
                     blocking=True,  # Wait for completion to ensure success
                 )
                 state.is_on_load_control = True
-            except (ValueError, KeyError, RuntimeError) as err:
+            except (ValueError, KeyError, RuntimeError, ServiceValidationError) as err:
                 _LOGGER.error("Failed to turn on %s: %s", config.switch_entity, err)
 
         elif not new_plan.is_on and state.is_on:
@@ -628,7 +629,7 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
                     blocking=True,  # Wait for completion to ensure success
                 )
                 state.is_on_load_control = False
-            except (ValueError, KeyError, RuntimeError) as err:
+            except (ValueError, KeyError, RuntimeError, ServiceValidationError) as err:
                 _LOGGER.error("Failed to turn off %s: %s", config.switch_entity, err)
 
                 # If we fail to turn off a load, abort all load control for safety
@@ -672,7 +673,12 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
                             service_data,
                             blocking=True,  # Wait for completion to ensure success
                         )
-                    except (ValueError, KeyError, RuntimeError) as err:
+                    except (
+                        ValueError,
+                        KeyError,
+                        RuntimeError,
+                        ServiceValidationError,
+                    ) as err:
                         _LOGGER.error(
                             "Failed to throttle %s: %s",
                             config.throttle_amps_entity,
