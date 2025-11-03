@@ -45,7 +45,7 @@ Install via HACS or manually copy the `custom_components/zerogrid` directory to 
 | `max_total_load_amps` | Yes | - | Maximum total load your electrical system can handle |
 | `max_grid_import_amps` | Yes | - | Maximum power draw allowed from the grid |
 | `max_solar_generation_amps` | Yes | - | Maximum solar generation capacity in amps |
-| `safety_margin_amps` | No | 5.0 | Safety buffer above maximum load before triggering overload protection |
+| `safety_margin_amps` | No | 2.0 | Safety buffer above maximum load before triggering overload protection |
 | `hysteresis_amps` | No | 1.0 | Prevents rapid switching/oscillation |
 | `recalculate_interval_seconds` | No | 10 | Periodic recalculation interval (in addition to event-driven) |
 
