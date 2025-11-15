@@ -37,6 +37,7 @@ class ControllableLoadState:
         self.is_switch_rate_limited: bool = False
         self.is_throttle_rate_limited: bool = False
         self.on_since: datetime | None = None
+        self.can_turn_on: bool = True  # External constraint allowing turn on
 
 
 class State:

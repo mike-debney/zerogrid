@@ -14,6 +14,7 @@ class ControllableLoadConfig:
     switch_entity: str
     throttle_amps_entity: str | None = None
     can_throttle: bool = False
+    can_turn_on_entity: str | None = None
 
 
 class Config:

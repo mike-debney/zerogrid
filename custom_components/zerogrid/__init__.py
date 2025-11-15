@@ -122,6 +122,7 @@ def parse_config(domain_config):
         control_config.switch_entity = control.get("switch_entity")
         control_config.throttle_amps_entity = control.get("throttle_amps_entity", None)
         control_config.can_throttle = control_config.throttle_amps_entity is not None
+        control_config.can_turn_on_entity = control.get("can_turn_on_entity", None)
         CONFIG.controllable_loads[control_config.name] = control_config
 
     _LOGGER.debug("Config successful: %s", CONFIG)
@@ -192,6 +193,19 @@ def initialise_state(hass: HomeAssistant):
         ):
             load_state.current_load_amps = float(load_amps_state.state)
 
+        # Initialize can_turn_on state from entity if configured
+        if config.can_turn_on_entity is not None:
+            can_turn_on_state = hass.states.get(config.can_turn_on_entity)
+            if can_turn_on_state is not None and can_turn_on_state.state not in (
+                "unknown",
+                "unavailable",
+            ):
+                load_state.can_turn_on = can_turn_on_state.state == STATE_ON
+            else:
+                load_state.can_turn_on = False  # Default to safe state
+        else:
+            load_state.can_turn_on = True  # No constraint configured
+
         STATE.controllable_loads[load_name] = load_state
         PLAN.controllable_loads[load_name] = ControllableLoadPlanState()
         _LOGGER.debug(
@@ -214,10 +228,12 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
         entity_ids.append(CONFIG.solar_generation_kw_entity)
         entity_ids.append(CONFIG.mains_voltage_entity)
 
-    for control in CONFIG.controllable_loads.values():
-        entity_ids.append(control.load_amps_entity)
-        if control.switch_entity is not None:
-            entity_ids.append(control.switch_entity)
+    for config in CONFIG.controllable_loads.values():
+        entity_ids.append(config.load_amps_entity)
+        if config.switch_entity is not None:
+            entity_ids.append(config.switch_entity)
+        if config.can_turn_on_entity is not None:
+            entity_ids.append(config.can_turn_on_entity)
 
     async def state_automation_listener(event: Event[EventStateChangedData]) -> None:
         if event.event_type != "state_changed":
@@ -268,12 +284,11 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                     "Solar generation entity is unavailable, assuming zero generation"
                 )
         else:
-            STATE.load_control_consumption_amps = 0.0
-
             # match to controllable loads
-            for control in CONFIG.controllable_loads.values():
-                load = STATE.controllable_loads[control.name]
-                if entity_id == control.switch_entity:
+            for config in CONFIG.controllable_loads.values():
+                load = STATE.controllable_loads[config.name]
+
+                if entity_id == config.switch_entity:
                     _LOGGER.debug(
                         "Switch entity %s changed to %s", entity_id, new_state.state
                     )
@@ -289,7 +304,7 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                     else:
                         load.on_since = None
 
-                if entity_id == control.load_amps_entity:
+                elif entity_id == config.load_amps_entity:
                     if new_state is not None and new_state.state not in (
                         "unknown",
                         "unavailable",
@@ -297,7 +312,32 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                         load.current_load_amps = float(new_state.state)
                     else:
                         load.current_load_amps = 0.0
-                STATE.load_control_consumption_amps += load.current_load_amps
+
+                elif (
+                    config.can_turn_on_entity is not None
+                    and entity_id == config.can_turn_on_entity
+                ):
+                    # Handle changes to can_turn_on_entity
+                    if new_state is not None and new_state.state not in (
+                        "unknown",
+                        "unavailable",
+                    ):
+                        load.can_turn_on = new_state.state == STATE_ON
+                        _LOGGER.debug(
+                            "Can turn on entity %s for load %s changed to %s (can_turn_on=%s)",
+                            entity_id,
+                            config.name,
+                            new_state.state,
+                            load.can_turn_on,
+                        )
+                    else:
+                        load.can_turn_on = False  # Safe default
+                        _LOGGER.warning(
+                            "Can turn on entity %s for load %s is %s, preventing turn on",
+                            entity_id,
+                            config.name,
+                            new_state.state,
+                        )
 
     async def state_time_listener(now: datetime) -> None:
         if CONFIG.enable_automatic_recalculation:
@@ -472,7 +512,21 @@ async def recalculate_load_control(hass: HomeAssistant):
         will_consume_amps = 0.0
 
         # Determine if this load should be on
-        should_be_on = available_amps >= config.min_controllable_load_amps
+        # Check both available power and external constraints
+        should_be_on = (
+            available_amps >= config.min_controllable_load_amps and state.can_turn_on
+        )
+
+        # Log if external constraint is preventing turn on
+        if (
+            available_amps >= config.min_controllable_load_amps
+            and not state.can_turn_on
+        ):
+            _LOGGER.debug(
+                "Load %s has sufficient power but external constraint prevents turn on",
+                load_name,
+            )
+
         if state.is_switch_rate_limited:
             _LOGGER.debug(
                 "Unable to change load %s due to switch rate limit", load_name
@@ -497,6 +551,16 @@ async def recalculate_load_control(hass: HomeAssistant):
                 )
         else:
             will_consume_amps = 0.0
+
+        # Account for loads that are on but may be drawing less than expected
+        if (
+            plan.is_on
+            and state.on_since is not None
+            and state.on_since
+            + timedelta(seconds=CONFIG.load_measurement_delay_seconds)
+            < now
+        ):
+            will_consume_amps = round(state.current_load_amps)
 
         plan.expected_load_amps = will_consume_amps
         available_amps -= will_consume_amps
@@ -523,16 +587,30 @@ async def recalculate_load_control(hass: HomeAssistant):
 
             previously_allocated_amps = plan.expected_load_amps
 
-            # Give the load as much power as we can, accounting for what was previously allocated
-            will_consume_amps = min(
-                available_amps + previously_allocated_amps,
-                config.max_controllable_load_amps,
-            )
-            will_consume_amps = round(will_consume_amps)
+            will_consume_amps = 0.0
+
+            # Check if load has been on for a while but not drawing significant power
+            if (
+                state.on_since is not None
+                and state.on_since
+                + timedelta(seconds=CONFIG.load_measurement_delay_seconds)
+                < now
+                and state.current_load_amps < 1
+            ):
+                will_consume_amps = round(state.current_load_amps)
+                plan.throttle_amps = config.min_controllable_load_amps
+
+            else:
+                # Give the load as much power as we can, accounting for what was previously allocated
+                will_consume_amps = min(
+                    available_amps + previously_allocated_amps,
+                    config.max_controllable_load_amps,
+                )
+                will_consume_amps = round(will_consume_amps)
+                plan.throttle_amps = will_consume_amps
 
             available_amps += previously_allocated_amps - will_consume_amps
             plan.expected_load_amps = will_consume_amps
-            plan.throttle_amps = will_consume_amps
             _LOGGER.debug(
                 "Planning to throttle load %s to %gA", load_name, will_consume_amps
             )
