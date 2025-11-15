@@ -1,5 +1,4 @@
-# ZeroGrid Integration
-
+# ZeroGrid
 ZeroGrid is a Home Assistant integration that intelligently manages controllable loads to maximize use of available power from solar and/or grid while preventing circuit overload. It dynamically allocates power to multiple loads based on priority and measured consumption.
 
 ## Features
