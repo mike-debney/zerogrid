@@ -620,6 +620,7 @@ async def recalculate_load_control(hass: HomeAssistant):
     if (
         STATE.house_consumption_amps
         >= max_safe_total_load_amps + CONFIG.safety_margin_amps
+        and max_safe_total_load_amps > 0
     ):
         if STATE.last_overload is None:
             STATE.last_overload = now
