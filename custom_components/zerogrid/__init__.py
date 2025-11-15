@@ -82,6 +82,9 @@ def parse_config(domain_config):
     CONFIG.recalculate_interval_seconds = domain_config.get(
         "recalculate_interval_seconds", 10
     )
+    CONFIG.load_measurement_delay_seconds = domain_config.get(
+        "load_measurement_delay_seconds", 120
+    )
     CONFIG.enable_automatic_recalculation = domain_config.get(
         "enable_automatic_recalculation", True
     )
@@ -338,12 +341,25 @@ async def calculate_effective_available_power(
 
     # Subtract loads that are under load control, since we can manage those
     total_load_not_under_control = STATE.house_consumption_amps
+    now = datetime.now()
     for load_name in STATE.controllable_loads:  # pylint: disable=consider-using-dict-items
         load_state = STATE.controllable_loads[load_name]
+        load_plan = PLAN.controllable_loads.get(load_name)
+
         if load_state.is_under_load_control and load_state.is_on:
-            total_load_not_under_control -= load_state.current_load_amps
+            current_load = load_state.current_load_amps
+            # Determine if we should use expected load instead of measured load
+            # to account for soft starts and measurement delays
+            if load_state.on_since is not None and load_plan is not None:
+                time_since_on = (now - load_state.on_since).total_seconds()
+                if time_since_on < CONFIG.load_measurement_delay_seconds:
+                    current_load = load_plan.expected_load_amps
+
+            total_load_not_under_control -= current_load
             _LOGGER.debug(
-                "Load %s drawing %gA", load_name, load_state.current_load_amps
+                "Load %s drawing %gA",
+                load_name,
+                current_load,
             )
 
     total_available_amps = (
