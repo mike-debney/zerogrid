@@ -174,9 +174,13 @@ def initialise_state(hass: HomeAssistant):
             "unavailable",
         ):
             load_state.is_on = hass.states.is_state(config.switch_entity, STATE_ON)
-            load_state.is_on_load_control = (
+            load_state.is_under_load_control = (
                 load_state.is_on
             )  # Assume under control initially
+            if load_state.is_on and load_state.is_under_load_control:
+                load_state.on_since = datetime.now()
+            else:
+                load_state.on_since = None
 
         load_amps_state = hass.states.get(config.load_amps_entity)
         if load_amps_state is not None and load_amps_state.state not in (
@@ -277,6 +281,10 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                         load.is_on = new_state.state != STATE_OFF
                     else:
                         load.is_on = False
+                    if load.is_on and load.is_under_load_control:
+                        load.on_since = datetime.now()
+                    else:
+                        load.on_since = None
 
                 if entity_id == control.load_amps_entity:
                     if new_state is not None and new_state.state not in (
@@ -332,7 +340,7 @@ async def calculate_effective_available_power(
     total_load_not_under_control = STATE.house_consumption_amps
     for load_name in STATE.controllable_loads:  # pylint: disable=consider-using-dict-items
         load_state = STATE.controllable_loads[load_name]
-        if load_state.is_on_load_control and load_state.is_on:
+        if load_state.is_under_load_control and load_state.is_on:
             total_load_not_under_control -= load_state.current_load_amps
             _LOGGER.debug(
                 "Load %s drawing %gA", load_name, load_state.current_load_amps
@@ -384,7 +392,7 @@ async def recalculate_load_control(hass: HomeAssistant):
         # Reset load state
         for control in CONFIG.controllable_loads.values():
             load = STATE.controllable_loads[control.name]
-            load.is_on_load_control = True
+            load.is_under_load_control = True
             load.last_throttled = None
             load.last_toggled = None
         return
@@ -439,7 +447,7 @@ async def recalculate_load_control(hass: HomeAssistant):
             > now
         )
 
-        if not state.is_on_load_control and state.is_on:
+        if not state.is_under_load_control and state.is_on:
             # Load is manually turned on - we have no control
             plan.is_on = state.is_on
             _LOGGER.debug("Load %s manually turned on, skipping control", load_name)
@@ -534,7 +542,7 @@ async def recalculate_load_control(hass: HomeAssistant):
             for load_name in reversed(prioritised_loads):
                 plan = new_plan.controllable_loads[load_name]
                 state = STATE.controllable_loads[load_name]
-                if not plan.is_on or not state.is_on_load_control:
+                if not plan.is_on or not state.is_under_load_control:
                     continue  # Load will already be off or out of our control
 
                 plan.is_on = False
@@ -612,7 +620,7 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
                     {"entity_id": config.switch_entity},
                     blocking=True,  # Wait for completion to ensure success
                 )
-                state.is_on_load_control = True
+                state.is_under_load_control = True
             except (ValueError, KeyError, RuntimeError, ServiceValidationError) as err:
                 _LOGGER.error("Failed to turn on %s: %s", config.switch_entity, err)
 
@@ -628,7 +636,7 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
                     {"entity_id": config.switch_entity},
                     blocking=True,  # Wait for completion to ensure success
                 )
-                state.is_on_load_control = False
+                state.is_under_load_control = False
             except (ValueError, KeyError, RuntimeError, ServiceValidationError) as err:
                 _LOGGER.error("Failed to turn off %s: %s", config.switch_entity, err)
 
@@ -640,7 +648,7 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
             config.can_throttle
             and new_plan.is_on
             and config.throttle_amps_entity
-            and state.is_on_load_control
+            and state.is_under_load_control
         ):
             # Check if throttle entity exists
             if hass.states.get(config.throttle_amps_entity) is None:
@@ -729,7 +737,7 @@ async def safety_abort(hass: HomeAssistant):
 
             state = STATE.controllable_loads[load_name]
             state.is_on = False
-            state.is_on_load_control = False
+            state.is_under_load_control = False
             state.last_toggled = datetime.now()
             state.last_throttled = datetime.now()
 

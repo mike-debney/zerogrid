@@ -29,13 +29,14 @@ class ControllableLoadState:
     def __init__(self) -> None:
         """Initialize the controllable load state."""
         self.is_on: bool = False  # Actual state of the switch
-        self.is_on_load_control: bool = False  # True if we have turned it on
+        self.is_under_load_control: bool = False  # True if we have turned it on
         self.last_toggled: datetime | None = None
         self.last_throttled: datetime | None = None
         self.current_load_amps: float = 0.0
         self.expected_load_amps: float = 0.0  # What we planned for this load to consume
         self.is_switch_rate_limited: bool = False
         self.is_throttle_rate_limited: bool = False
+        self.on_since: datetime | None = None
 
 
 class State:
