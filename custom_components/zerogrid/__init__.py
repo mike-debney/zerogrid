@@ -379,9 +379,26 @@ async def calculate_effective_available_power(
         )
         max_safe_total_load_amps += CONFIG.max_solar_generation_amps
 
+    # Calculate total available power before accounting for loads
+    # This is what we want to track the minimum of
+    now = datetime.now()
+    total_available_power_amps = grid_maximum_amps + solar_generation_amps
+    # Safety cap to maximum total available load
+    total_available_power_amps = min(
+        total_available_power_amps, CONFIG.max_total_load_amps
+    )
+
+    # Determine max window duration based on longest min_toggle_interval
+    max_window_seconds = max(
+        config.min_toggle_interval_seconds
+        for config in CONFIG.controllable_loads.values()
+    )
+
+    # Accumulate the total unallocated power (before subtracting loads) into history
+    STATE.accumulate_unallocated_amps(total_available_power_amps, max_window_seconds)
+
     # Subtract loads that are under load control, since we can manage those
     total_load_not_under_control = STATE.house_consumption_amps
-    now = datetime.now()
     for load_name in STATE.controllable_loads:  # pylint: disable=consider-using-dict-items
         load_state = STATE.controllable_loads[load_name]
         load_plan = PLAN.controllable_loads.get(load_name)
@@ -402,13 +419,15 @@ async def calculate_effective_available_power(
                 current_load,
             )
 
-    total_available_amps = (
-        grid_maximum_amps + solar_generation_amps - max(total_load_not_under_control, 0)
+    # Now calculate total available for load control by subtracting non-controlled loads
+    total_available_amps = total_available_power_amps - max(
+        total_load_not_under_control, 0
     )
-    # Safety cap to maximum total available load
-    total_available_amps = min(total_available_amps, CONFIG.max_total_load_amps)
+
     _LOGGER.debug(
-        "Total load available for load control: %gA",
+        "Total available power: %gA, uncontrolled load: %gA, available for load control: %gA",
+        total_available_power_amps,
+        total_load_not_under_control,
         total_available_amps,
     )
 
@@ -527,6 +546,25 @@ async def recalculate_load_control(hass: HomeAssistant):
                 load_name,
             )
 
+        # Make sure we have a stable minimum available power before turning on (important for solar)
+        min_unallocated_amps = STATE.get_minimum_unallocated_amps(
+            config.min_toggle_interval_seconds
+        )
+        if (
+            should_be_on
+            and not state.is_on
+            and not previous_plan.is_on
+            and not STATE.allow_grid_import
+        ):
+            if min_unallocated_amps < config.min_controllable_load_amps:
+                _LOGGER.debug(
+                    "Preventing load %s turn on due to insufficient minimum capacity of %gA over last %ds",
+                    load_name,
+                    min_unallocated_amps,
+                    config.min_toggle_interval_seconds,
+                )
+                should_be_on = False
+
         if state.is_switch_rate_limited:
             _LOGGER.debug(
                 "Unable to change load %s due to switch rate limit", load_name
@@ -595,7 +633,7 @@ async def recalculate_load_control(hass: HomeAssistant):
                 and state.on_since
                 + timedelta(seconds=CONFIG.load_measurement_delay_seconds)
                 < now
-                and state.current_load_amps < 1
+                and state.current_load_amps < config.min_controllable_load_amps
             ):
                 will_consume_amps = round(state.current_load_amps)
                 plan.throttle_amps = config.min_controllable_load_amps

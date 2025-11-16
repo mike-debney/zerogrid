@@ -45,9 +45,8 @@ For example:
 
 The optional `can_turn_on_entity` allows you to prevent a load from being turned on based on external conditions:
 
--   When the entity state is "on", the load can be turned on (if power is available)
+-   When the entity state is "on", the load can be turned on if power is available
 -   When the entity state is "off", the load will not be turned on even if power is available
--   If the entity is unavailable or unknown, the load is prevented from turning on for safety
 -   Useful for scenarios like:
     -   Only charge EV when car is plugged in (`binary_sensor.car_plugged_in`)
     -   Only heat pool when home is occupied (`binary_sensor.home_occupied`)
