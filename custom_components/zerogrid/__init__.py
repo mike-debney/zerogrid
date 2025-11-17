@@ -627,26 +627,26 @@ async def recalculate_load_control(hass: HomeAssistant):
 
             will_consume_amps = 0.0
 
-            # Check if load has been on for a while but not drawing significant power
-            if (
-                state.on_since is not None
-                and state.on_since
-                + timedelta(seconds=CONFIG.load_measurement_delay_seconds)
-                < now
-                and state.current_load_amps
-                < plan.throttle_amps - CONFIG.hysteresis_amps
-            ):
-                will_consume_amps = round(state.current_load_amps)
-                plan.throttle_amps = previous_plan.throttle_amps
+            # # Check if load has been on for a while but not drawing significant power
+            # if (
+            #     state.on_since is not None
+            #     and state.on_since
+            #     + timedelta(seconds=CONFIG.load_measurement_delay_seconds)
+            #     < now
+            #     and state.current_load_amps
+            #     < plan.throttle_amps - CONFIG.hysteresis_amps
+            # ):
+            #     will_consume_amps = round(state.current_load_amps)
+            #     plan.throttle_amps = previous_plan.throttle_amps
 
-            else:
-                # Give the load as much power as we can, accounting for what was previously allocated
-                will_consume_amps = min(
-                    available_amps + previously_allocated_amps,
-                    config.max_controllable_load_amps,
-                )
-                will_consume_amps = round(will_consume_amps)
-                plan.throttle_amps = will_consume_amps
+            # else:
+            # Give the load as much power as we can, accounting for what was previously allocated
+            will_consume_amps = min(
+                available_amps + previously_allocated_amps,
+                config.max_controllable_load_amps,
+            )
+            will_consume_amps = round(will_consume_amps)
+            plan.throttle_amps = will_consume_amps
 
             available_amps += previously_allocated_amps - will_consume_amps
             plan.expected_load_amps = will_consume_amps
