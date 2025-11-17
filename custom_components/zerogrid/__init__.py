@@ -633,10 +633,11 @@ async def recalculate_load_control(hass: HomeAssistant):
                 and state.on_since
                 + timedelta(seconds=CONFIG.load_measurement_delay_seconds)
                 < now
-                and state.current_load_amps < config.min_controllable_load_amps
+                and state.current_load_amps
+                < plan.throttle_amps - CONFIG.hysteresis_amps
             ):
                 will_consume_amps = round(state.current_load_amps)
-                plan.throttle_amps = config.min_controllable_load_amps
+                plan.throttle_amps = previous_plan.throttle_amps
 
             else:
                 # Give the load as much power as we can, accounting for what was previously allocated
