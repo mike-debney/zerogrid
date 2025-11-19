@@ -147,25 +147,9 @@ def initialise_state(hass: HomeAssistant):
     else:
         STATE.solar_generation_kw = 0.0
 
-    # Initialize allow_grid_import from switch entity (will be set up by platform)
-    grid_import_state = hass.states.get(ALLOW_GRID_IMPORT_SWITCH_ID)
-    if grid_import_state is not None and grid_import_state.state not in (
-        "unknown",
-        "unavailable",
-    ):
-        STATE.allow_grid_import = grid_import_state.state == STATE_ON
-    else:
-        STATE.allow_grid_import = False  # Default to safe state
-
-    # Initialize enable_load_control from switch entity (will be set up by platform)
-    load_control_state = hass.states.get(ENABLE_LOAD_CONTROL_SWITCH_ID)
-    if load_control_state is not None and load_control_state.state not in (
-        "unknown",
-        "unavailable",
-    ):
-        STATE.enable_load_control = load_control_state.state == STATE_ON
-    else:
-        STATE.enable_load_control = False  # Default to safe state
+    # Don't initialize switch states here - they will be initialized by the switch
+    # entities themselves when they restore their state in async_added_to_hass.
+    # The switches will update STATE.allow_grid_import and STATE.enable_load_control.
 
     # match to controllable loads
     for load_name in CONFIG.controllable_loads:  # pylint: disable=consider-using-dict-items
@@ -627,19 +611,6 @@ async def recalculate_load_control(hass: HomeAssistant):
 
             will_consume_amps = 0.0
 
-            # # Check if load has been on for a while but not drawing significant power
-            # if (
-            #     state.on_since is not None
-            #     and state.on_since
-            #     + timedelta(seconds=CONFIG.load_measurement_delay_seconds)
-            #     < now
-            #     and state.current_load_amps
-            #     < plan.throttle_amps - CONFIG.hysteresis_amps
-            # ):
-            #     will_consume_amps = round(state.current_load_amps)
-            #     plan.throttle_amps = previous_plan.throttle_amps
-
-            # else:
             # Give the load as much power as we can, accounting for what was previously allocated
             will_consume_amps = min(
                 available_amps + previously_allocated_amps,

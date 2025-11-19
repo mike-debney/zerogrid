@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from . import CONFIG, STATE, recalculate_load_control
@@ -41,7 +42,7 @@ async def async_setup_platform(
     async_add_entities([enable_switch, allow_grid_import_switch])
 
 
-class EnableLoadControlSwitch(SwitchEntity):
+class EnableLoadControlSwitch(SwitchEntity, RestoreEntity):
     """Switch to enable/disable load control."""
 
     _attr_has_entity_name = True
@@ -52,12 +53,32 @@ class EnableLoadControlSwitch(SwitchEntity):
         """Initialize the switch."""
         self._attr_name = "Enable load control"
         self._attr_unique_id = ENABLE_LOAD_CONTROL_SWITCH_ID
-        self._attr_is_on = True
         self._attr_device_info = DEVICE_INFO
+        # Don't set _attr_is_on here - let it be restored in async_added_to_hass
 
     async def async_added_to_hass(self) -> None:
         """Handle entity being added to hass."""
         await super().async_added_to_hass()
+
+        # Restore previous state if available
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            self._attr_is_on = last_state.state == "on"
+            _LOGGER.info(
+                "Restored enable load control switch state: %s (was: %s)",
+                self._attr_is_on,
+                last_state.state,
+            )
+        else:
+            # No previous state, use default of True (enabled)
+            self._attr_is_on = True
+            _LOGGER.info(
+                "No previous state found for enable load control switch, using default: True"
+            )
+
+        # Write the state immediately after restoration
+        self.async_write_ha_state()
+
         # Sync initial state to the integration
         await self._update_integration_state()
 
@@ -94,7 +115,7 @@ class EnableLoadControlSwitch(SwitchEntity):
         self.async_write_ha_state()
 
 
-class AllowGridImportSwitch(SwitchEntity):
+class AllowGridImportSwitch(SwitchEntity, RestoreEntity):
     """Switch to allow/disallow grid import for load control."""
 
     _attr_has_entity_name = True
@@ -105,12 +126,32 @@ class AllowGridImportSwitch(SwitchEntity):
         """Initialize the switch."""
         self._attr_name = "Allow grid import"
         self._attr_unique_id = ALLOW_GRID_IMPORT_SWITCH_ID
-        self._attr_is_on = True
         self._attr_device_info = DEVICE_INFO
+        # Don't set _attr_is_on here - let it be restored in async_added_to_hass
 
     async def async_added_to_hass(self) -> None:
         """Handle entity being added to hass."""
         await super().async_added_to_hass()
+
+        # Restore previous state if available
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            self._attr_is_on = last_state.state == "on"
+            _LOGGER.info(
+                "Restored allow grid import switch state: %s (was: %s)",
+                self._attr_is_on,
+                last_state.state,
+            )
+        else:
+            # No previous state, use default of True (allowed)
+            self._attr_is_on = True
+            _LOGGER.info(
+                "No previous state found for allow grid import switch, using default: True"
+            )
+
+        # Write the state immediately after restoration
+        self.async_write_ha_state()
+
         # Sync initial state to the integration
         await self._update_integration_state()
 
