@@ -558,7 +558,7 @@ async def recalculate_load_control(hass: HomeAssistant):
             + timedelta(seconds=CONFIG.load_measurement_delay_seconds)
             < now
         ):
-            will_consume_amps = round(state.current_load_amps)
+            will_consume_amps = state.current_load_amps
 
         plan.expected_load_amps = will_consume_amps
         available_amps -= will_consume_amps
