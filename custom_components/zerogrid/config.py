@@ -28,8 +28,7 @@ class Config:
     recalculate_interval_seconds: int = 10
     load_measurement_delay_seconds: int = 120
     house_consumption_amps_entity: str
-    mains_voltage_entity: str | None = None
-    solar_generation_kw_entity: str | None = None
+    solar_generation_amps_entity: str | None = None
     allow_solar_consumption: bool = False
     enable_automatic_recalculation: bool = True
     controllable_loads: dict[str, ControllableLoadConfig] = {}

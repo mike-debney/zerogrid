@@ -49,10 +49,9 @@ class State:
         self.available_amps: float = 0.0
         self.house_consumption_amps: float = 0.0
         self.load_control_consumption_amps: float = 0.0
-        self.mains_voltage: float = 0.0
         self.allow_grid_import: bool = False
         self.enable_load_control: bool = False
-        self.solar_generation_kw: float = 0.0
+        self.solar_generation_amps: float = 0.0
         self.controllable_loads: dict[str, ControllableLoadState] = {}
         self.last_overload: datetime | None = None
         self.last_recalculation: datetime | None = None

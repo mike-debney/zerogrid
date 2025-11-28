@@ -74,11 +74,10 @@ Install via HACS or manually copy the `custom_components/zerogrid` directory to 
 
 #### Monitoring Entities
 
-| Option                          | Required | Description                                                                                   |
-| ------------------------------- | -------- | --------------------------------------------------------------------------------------------- |
-| `house_consumption_amps_entity` | Yes      | Sensor measuring total house consumption in amps                                              |
-| `solar_generation_kw_entity`    | No       | Sensor measuring solar generation in kW, if this is omitted solar production will not be used |
-| `mains_voltage_entity`          | No       | Sensor measuring mains voltage, if this is omitted solar production will not be used          |
+| Option                          | Required | Description                                                                                     |
+| ------------------------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `house_consumption_amps_entity` | Yes      | Sensor measuring total house consumption in amps                                                |
+| `solar_generation_amps_entity`  | No       | Sensor measuring solar generation in amps, if this is omitted solar production will not be used |
 
 #### Controllable Loads
 
@@ -106,14 +105,13 @@ zerogrid:
     # Required: System limits
     max_total_load_amps: 63 # Maximum total load your system can handle
     max_grid_import_amps: 63 # Maximum draw from grid
-    max_solar_generation_amps: 20 # Maximum solar generation capacity
+    max_solar_generation_amps: 42 # Maximum solar generation capacity
 
     # Required: Monitoring entities
-    house_consumption_amps_entity: "sensor.house_consumption"
+    house_consumption_amps_entity: "sensor.house_consumption_current"
 
     # Optional: Solar generation
-    solar_generation_kw_entity: "sensor.solar_generation"
-    mains_voltage_entity: "sensor.mains_voltage"
+    solar_generation_amps_entity: "sensor.solar_generation_current"
 
     # Optional: Safety and timing
     safety_margin_amps: 2.0 # Safety buffer above max load (default: 2.0)

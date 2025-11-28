@@ -92,14 +92,10 @@ def parse_config(domain_config):
         "house_consumption_amps_entity", None
     )
 
-    CONFIG.mains_voltage_entity = domain_config.get("mains_voltage_entity")
-    CONFIG.solar_generation_kw_entity = domain_config.get(
-        "solar_generation_kw_entity", None
+    CONFIG.solar_generation_amps_entity = domain_config.get(
+        "solar_generation_amps_entity", None
     )
-    CONFIG.allow_solar_consumption = (
-        CONFIG.mains_voltage_entity is not None
-        and CONFIG.solar_generation_kw_entity is not None
-    )
+    CONFIG.allow_solar_consumption = CONFIG.solar_generation_amps_entity is not None
 
     control_options = domain_config.get("controllable_loads", [])
     for priority, control in enumerate(control_options):
@@ -135,17 +131,12 @@ def initialise_state(hass: HomeAssistant):
         if state is not None and state.state not in ("unknown", "unavailable"):
             STATE.house_consumption_amps = float(state.state)
 
-    if CONFIG.mains_voltage_entity is not None:
-        state = hass.states.get(CONFIG.mains_voltage_entity)
+    if CONFIG.solar_generation_amps_entity is not None:
+        state = hass.states.get(CONFIG.solar_generation_amps_entity)
         if state is not None and state.state not in ("unknown", "unavailable"):
-            STATE.mains_voltage = float(state.state)
-
-    if CONFIG.solar_generation_kw_entity is not None:
-        state = hass.states.get(CONFIG.solar_generation_kw_entity)
-        if state is not None and state.state not in ("unknown", "unavailable"):
-            STATE.solar_generation_kw = float(state.state)
+            STATE.solar_generation_amps = float(state.state)
     else:
-        STATE.solar_generation_kw = 0.0
+        STATE.solar_generation_amps = 0.0
 
     # Don't initialize switch states here - they will be initialized by the switch
     # entities themselves when they restore their state in async_added_to_hass.
@@ -206,11 +197,9 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
     entity_ids: list[str] = [CONFIG.house_consumption_amps_entity]
     if (
         CONFIG.allow_solar_consumption
-        and CONFIG.solar_generation_kw_entity is not None
-        and CONFIG.mains_voltage_entity is not None
+        and CONFIG.solar_generation_amps_entity is not None
     ):
-        entity_ids.append(CONFIG.solar_generation_kw_entity)
-        entity_ids.append(CONFIG.mains_voltage_entity)
+        entity_ids.append(CONFIG.solar_generation_amps_entity)
 
     for config in CONFIG.controllable_loads.values():
         entity_ids.append(config.load_amps_entity)
@@ -243,27 +232,14 @@ def subscribe_to_entity_changes(hass: HomeAssistant):
                 await safety_abort(hass)
                 return
 
-        elif entity_id == CONFIG.mains_voltage_entity:
+        elif entity_id == CONFIG.solar_generation_amps_entity:
             if new_state is not None and new_state.state not in (
                 "unknown",
                 "unavailable",
             ):
-                STATE.mains_voltage = float(new_state.state)
+                STATE.solar_generation_amps = float(new_state.state)
             else:
-                _LOGGER.error(
-                    "Mains voltage entity is unavailable, cutting all load for safety"
-                )
-                await safety_abort(hass)
-                return
-
-        elif entity_id == CONFIG.solar_generation_kw_entity:
-            if new_state is not None and new_state.state not in (
-                "unknown",
-                "unavailable",
-            ):
-                STATE.solar_generation_kw = float(new_state.state)
-            else:
-                STATE.solar_generation_kw = 0.0
+                STATE.solar_generation_amps = 0.0
                 _LOGGER.warning(
                     "Solar generation entity is unavailable, assuming zero generation"
                 )
@@ -354,19 +330,18 @@ async def calculate_effective_available_power(
         grid_maximum_amps = CONFIG.max_grid_import_amps
         max_safe_total_load_amps += CONFIG.max_grid_import_amps
 
-    # Convert solar generation to amps
-    solar_generation_amps = 0.0
-    if CONFIG.allow_solar_consumption and STATE.solar_generation_kw > 0:
-        solar_generation_amps = (STATE.solar_generation_kw * 1000) / STATE.mains_voltage
-        solar_generation_amps = min(
-            solar_generation_amps, CONFIG.max_solar_generation_amps
+    # Use solar generation amps directly
+    capped_solar_generation_amps = 0.0
+    if CONFIG.allow_solar_consumption and STATE.solar_generation_amps > 0:
+        capped_solar_generation_amps = min(
+            STATE.solar_generation_amps, CONFIG.max_solar_generation_amps
         )
         max_safe_total_load_amps += CONFIG.max_solar_generation_amps
 
     # Calculate total available power before accounting for loads
     # This is what we want to track the minimum of
     now = datetime.now()
-    total_available_power_amps = grid_maximum_amps + solar_generation_amps
+    total_available_power_amps = grid_maximum_amps + capped_solar_generation_amps
     # Safety cap to maximum total available load
     total_available_power_amps = min(
         total_available_power_amps, CONFIG.max_total_load_amps
