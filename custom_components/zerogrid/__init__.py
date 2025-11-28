@@ -424,6 +424,7 @@ async def recalculate_load_control(hass: HomeAssistant):
         _LOGGER.debug("Load control is disabled, skipping recalculation")
 
         # Reset load state
+        STATE.available_amps_history.clear()
         for control in CONFIG.controllable_loads.values():
             load = STATE.controllable_loads[control.name]
             load.is_under_load_control = True
