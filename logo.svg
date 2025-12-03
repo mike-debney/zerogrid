@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Circle background -->
+  <circle cx="100" cy="100" r="90" fill="#41bdf5"/>
+  
+  <!-- Lightning bolt Z shape - white -->
+  <path d="M 118 50 L 82 50 L 112 93 L 68 93 L 132 150 L 100 97 L 144 97 Z" 
+        fill="#ffffff"
+        transform="translate(-15, 0) scale(1.1) rotate(-25 100 100)"/>
+</svg>
