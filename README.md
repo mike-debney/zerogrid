@@ -1,6 +1,8 @@
+![ZeroGrid Logo](logo.svg)
 # ZeroGrid
 
-ZeroGrid is a Home Assistant integration that intelligently manages controllable loads to maximize use of available power from solar and/or grid while preventing circuit overload. It dynamically allocates power to multiple loads based on priority and measured consumption.
+ZeroGrid is a Home Assistant integration that intelligently manages controllable loads to maximize use of available power from solar in order to minimise grid dependence. It can also be used with or without solar to limit grid import and prevent circuit overload.
+
 
 ## Features
 
@@ -9,9 +11,18 @@ ZeroGrid is a Home Assistant integration that intelligently manages controllable
 -   **Throttleable loads** - Support for loads that can operate at variable power levels (e.g., EV chargers can be throttled between minimum and maximum amperage)
 -   **External constraints** - Optional `can_turn_on_entity` allows external conditions to control whether a load can be turned on (e.g., only try to charge EV when car is plugged in)
 -   **Soft start compensation** - Configurable delay period uses expected load instead of measured load to account for soft starts and measurement delays
--   **Overload detection** - Immediately sheds loads if consumption exceeds safe limits for more than `recalculate_interval_seconds * 3`, automatically recovers once sufficient load is shed
+-   **Overload detection** - Immediately sheds loads if consumption exceeds safe limits for more than `recalculate_interval_seconds`, automatically recovers once sufficient load is shed
 -   **Emergency abort** - Cuts all loads if critical sensors become unavailable, requires manual re-enabling of load-control
 -   **Rate limiting** - Reduces wear on contactors from rapid switching
+
+## Disclaimer
+
+**Use at Your Own Risk**
+
+This software is provided "as is," without any warranty of any kind, express or implied. The authors and contributors are not liable for any damages or losses, including but not limited to property damage, personal injury, or financial loss, arising from the use or inability to use this software.
+
+Controlling high-power electrical systems is inherently dangerous. It is your responsibility to ensure that your system is installed and configured safely and in compliance with all local laws and regulations. 
+
 
 ## How It Works
 
@@ -52,13 +63,33 @@ The optional `can_turn_on_entity` allows you to prevent a load from being turned
     -   Only heat pool when home is occupied (`binary_sensor.home_occupied`)
     -   Only run heat pump during off-peak hours (`binary_sensor.off_peak_period`)
 
+
 ## Installation
 
 Install via HACS or manually copy the `custom_components/zerogrid` directory to your Home Assistant configuration directory.
 
-## Configuration
+ZeroGrid is configured through the Home Assistant UI using a config flow. After installation, follow these steps:
 
-### Configuration Options
+1. Go to **Settings** → **Devices & Services**.
+2. Click **+ Add Integration** and search for "ZeroGrid".
+3. Follow the on-screen prompts to configure the integration.
+
+The setup process is divided into several steps:
+
+- **Initial Setup**: Name your ZeroGrid instance and provide the primary monitoring sensors.
+- **Safety & Limits**: Define the maximum load for your system, grid import, and solar generation, along with safety margins.
+- **Load Configuration**: Specify how many controllable loads you want to manage, then configure each one with its specific entities and parameters.
+
+You can create multiple instances of ZeroGrid to manage different sets of loads or phases independently.
+
+### Caveats & Gotchas
+
+- **Multi-Phase Systems**: To manage load across multiple phases, set up a separate instance of ZeroGrid for each phase you want to manage using the appropriate entities and constraints.
+- **Off-Grid & Export Limits**: To allocate power effectively, ZeroGrid needs to know the total available solar generation. This is typically measured by placing the solar array under a continuous load, which is most easily achieved by exporting surplus power to the grid. In off-grid systems or those with strict export limits, if there is no other consistent load, ZeroGrid cannot accurately gauge the available solar power. This can lead to suboptimal power allocation, so off-grid use is not recommended.
+
+### Configuration Options Reference
+
+Below is a reference of all available configuration options. These are entered through the UI during setup or can be modified later by reconfiguring the integration.
 
 #### System Settings
 
@@ -69,8 +100,9 @@ Install via HACS or manually copy the `custom_components/zerogrid` directory to 
 | `max_solar_generation_amps`      | Yes      | -       | Maximum solar generation capacity in amps                                                                                        |
 | `safety_margin_amps`             | No       | 2.0     | Safety buffer above maximum load before triggering overload protection                                                           |
 | `hysteresis_amps`                | No       | 1.0     | Prevents rapid switching/oscillation                                                                                             |
-| `recalculate_interval_seconds`   | No       | 10      | Periodic recalculation interval (in addition to event-driven based on house consumption readings)                                |
+| `recalculate_interval_seconds`   | No       | 30      | Periodic recalculation interval (in addition to event-driven based on house consumption readings)                                |
 | `load_measurement_delay_seconds` | No       | 120     | Time in seconds to use expected load instead of measured load after turning on (accounts for soft starts and measurement delays) |
+| `enable_automatic_recalculation` | No       | true    | Enable periodic recalculation of loads. If disabled, recalculation only occurs when house consumption changes.                   |
 
 #### Monitoring Entities
 
@@ -89,59 +121,16 @@ Each controllable load has the following configuration:
 | `min_controllable_load_amps` | Yes | - | Minimum power needed (same as max for non-throttleable loads) |
 | `load_amps_entity` | Yes | - | Sensor measuring actual consumption in amps |
 | `switch_entity` | Yes | - | Switch entity to control the load |
-| `min_toggle_interval_seconds` | No | 60 | Minimum time between on/off switches |
+| `min_toggle_interval_seconds` | No | 600 | Minimum time between on/off switches |
 | `throttle_amps_entity` | No | - | Number entity to control throttle level (enables throttling) |
 | `min_throttle_interval_seconds` | No | 10 | Minimum time between throttle adjustments |
 | `can_turn_on_entity` | No | - | Binary sensor or input_boolean that must be "on" for the load to be turned on |
 
 **Note:** Loads are prioritized in the order they appear in the configuration. The first load listed has the highest priority (priority 0), the second has priority 1, and so on.
 
-### Example Configuration
+---
 
-Add to your `configuration.yaml`:
-
-```yaml
-zerogrid:
-    # Required: System limits
-    max_total_load_amps: 63 # Maximum total load your system can handle
-    max_grid_import_amps: 63 # Maximum draw from grid
-    max_solar_generation_amps: 42 # Maximum solar generation capacity
-
-    # Required: Monitoring entities
-    house_consumption_amps_entity: "sensor.house_consumption_current"
-
-    # Optional: Solar generation
-    solar_generation_amps_entity: "sensor.solar_generation_current"
-
-    # Optional: Safety and timing
-    safety_margin_amps: 2.0 # Safety buffer above max load (default: 2.0)
-    hysteresis_amps: 1.0 # Prevents oscillation (default: 1.0)
-    recalculate_interval_seconds: 10 # Periodic recalculation interval (default: 10)
-    load_measurement_delay_seconds: 120 # Use expected load for this duration after turn-on (default: 120)
-
-    controllable_loads:
-        # First load = highest priority
-        # Non-throttleable: min = max (hot water heater is either fully on or off)
-        - name: "hot_water_heater"
-          max_controllable_load_amps: 10
-          min_controllable_load_amps: 10
-          min_toggle_interval_seconds: 300
-          load_amps_entity: "sensor.hot_water_current"
-          switch_entity: "switch.hot_water_heater"
-
-        # Second load = lower priority
-        # Throttleable: min < max, includes throttle_amps_entity
-        # With external constraint: only charge when car is plugged in
-        - name: "ev_charger"
-          max_controllable_load_amps: 16
-          min_controllable_load_amps: 6
-          min_toggle_interval_seconds: 60
-          min_throttle_interval_seconds: 30
-          load_amps_entity: "sensor.ev_charger_current"
-          switch_entity: "switch.ev_charger"
-          throttle_amps_entity: "number.ev_charger_max_current"
-          can_turn_on_entity: "binary_sensor.car_plugged_in" # Optional: external constraint
-```
+> **Migration Note:** If you previously configured ZeroGrid using YAML in `configuration.yaml`, please remove that configuration and set up the integration through the UI instead. All configuration is now managed through Home Assistant's integration interface.
 
 ## Entities
 
@@ -157,3 +146,4 @@ ZeroGrid creates the following entities that indicate how the system is performi
 | `binary_sensor.zerogrid_safety_abort` | Indicates if a safety abort has occurred because critical sensor data is unavailable.                                                            |
 | `switch.zerogrid_enable_load_control` | Master enable/disable for load control. When off, no loads will be automatically controlled. Cycling this also resets any throttling timers.     |
 | `switch.zerogrid_allow_grid_import`   | Enable/disable grid import. When off, only solar power can be used for controllable loads.                                                       |
+

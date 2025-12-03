@@ -5,17 +5,16 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 
-from homeassistant.const import STATE_OFF, STATE_ON, Platform
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_ON, Platform
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers.discovery import async_load_platform
 from homeassistant.helpers.event import (
     EventStateChangedData,
     async_track_state_change_event,
     async_track_time_interval,
 )
 from homeassistant.helpers.typing import ConfigType
-from homeassistant.loader import bind_hass
 
 from .config import Config, ControllableLoadConfig
 from .const import ALLOW_GRID_IMPORT_SWITCH_ID, DOMAIN, ENABLE_LOAD_CONTROL_SWITCH_ID
@@ -26,19 +25,21 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
 
+# Store per-entry instances keyed by entry_id
+CONFIGS: dict[str, Config] = {}
+STATES: dict[str, State] = {}
+PLANS: dict[str, PlanState] = {}
+
+# For backwards compatibility with existing code
 CONFIG = Config()
 STATE = State()
 PLAN = PlanState()
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Main entry point on startup."""
-    domain_config = config[DOMAIN]
-    parse_config(domain_config)
-    initialise_state(hass)
-    subscribe_to_entity_changes(hass)
+    """Set up the ZeroGrid component from YAML (legacy support)."""
 
-    # Register services
+    # Only register the service here - config entries handle the rest
     async def handle_recalculate_load_control(call) -> None:
         """Handle the recalculate_load_control service call."""
         _LOGGER.info("Manual recalculation triggered via service call")
@@ -50,18 +51,185 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         handle_recalculate_load_control,
     )
 
-    # Set up platforms
-    hass.async_create_task(
-        async_load_platform(hass, Platform.BINARY_SENSOR, DOMAIN, {}, config)
-    )
-    hass.async_create_task(
-        async_load_platform(hass, Platform.SENSOR, DOMAIN, {}, config)
-    )
-    hass.async_create_task(
-        async_load_platform(hass, Platform.SWITCH, DOMAIN, {}, config)
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up ZeroGrid from a config entry."""
+    _LOGGER.debug("Setting up ZeroGrid from config entry: %s", entry.entry_id)
+
+    # Create per-entry instances
+    CONFIGS[entry.entry_id] = Config()
+    STATES[entry.entry_id] = State()
+    PLANS[entry.entry_id] = PlanState()
+
+    # Set the global instances to this entry's instances for backwards compatibility
+    global CONFIG, STATE, PLAN
+    CONFIG = CONFIGS[entry.entry_id]
+    STATE = STATES[entry.entry_id]
+    PLAN = PLANS[entry.entry_id]
+
+    # Merge config entry data with options (options take precedence)
+    config_data = {**entry.data, **entry.options}
+
+    # Parse configuration from config entry
+    parse_config(config_data)
+    initialise_state(hass)
+
+    # Set up per-entry entity change listeners
+    config = CONFIGS[entry.entry_id]
+    state = STATES[entry.entry_id]
+    plan = PLANS[entry.entry_id]
+    entity_ids: list[str] = [config.house_consumption_amps_entity]
+    if (
+        config.allow_solar_consumption
+        and config.solar_generation_amps_entity is not None
+    ):
+        entity_ids.append(config.solar_generation_amps_entity)
+    for load_config in config.controllable_loads.values():
+        entity_ids.append(load_config.load_amps_entity)
+        if load_config.switch_entity is not None:
+            entity_ids.append(load_config.switch_entity)
+        if load_config.can_turn_on_entity is not None:
+            entity_ids.append(load_config.can_turn_on_entity)
+
+    async def state_automation_listener(event: Event[EventStateChangedData]) -> None:
+        if event.event_type != "state_changed":
+            return
+
+        entity_id = event.data["entity_id"]
+        new_state = event.data.get("new_state")
+        if new_state is None:
+            return
+
+        if entity_id == config.house_consumption_amps_entity:
+            if new_state is not None and new_state.state not in (
+                "unknown",
+                "unavailable",
+            ):
+                state.house_consumption_amps = float(new_state.state)
+                await recalculate_load_control(hass, entry.entry_id)
+            else:
+                _LOGGER.error(
+                    "House consumption entity is unavailable, cutting all load for safety"
+                )
+                await safety_abort(hass, entry.entry_id)
+                return
+        elif entity_id == config.solar_generation_amps_entity:
+            if new_state is not None and new_state.state not in (
+                "unknown",
+                "unavailable",
+            ):
+                state.solar_generation_amps = float(new_state.state)
+                await recalculate_load_control(hass, entry.entry_id)
+            else:
+                state.solar_generation_amps = 0.0
+        else:
+            # Check if it's a controllable load entity
+            for load_config in config.controllable_loads.values():
+                load = state.controllable_loads[load_config.name]
+
+                if entity_id == load_config.switch_entity:
+                    if new_state is not None and new_state.state not in (
+                        "unknown",
+                        "unavailable",
+                    ):
+                        load.is_on = new_state.state != "off"
+                        _LOGGER.debug(
+                            "Load %s switch changed to %s",
+                            load_config.name,
+                            new_state.state,
+                        )
+                        await recalculate_load_control(hass, entry.entry_id)
+                elif entity_id == load_config.load_amps_entity:
+                    if new_state is not None and new_state.state not in (
+                        "unknown",
+                        "unavailable",
+                    ):
+                        load.current_load_amps = float(new_state.state)
+                        await recalculate_load_control(hass, entry.entry_id)
+                elif (
+                    load_config.can_turn_on_entity is not None
+                    and entity_id == load_config.can_turn_on_entity
+                ):
+                    if new_state is not None and new_state.state not in (
+                        "unknown",
+                        "unavailable",
+                    ):
+                        load.can_turn_on = new_state.state == "on"
+                        _LOGGER.debug(
+                            "Load %s can_turn_on changed to %s",
+                            load_config.name,
+                            load.can_turn_on,
+                        )
+                    else:
+                        load.can_turn_on = False
+
+    async def state_time_listener(now: datetime) -> None:
+        if config.enable_automatic_recalculation:
+            if (
+                state.last_recalculation is None
+                or state.last_recalculation
+                + timedelta(seconds=config.recalculate_interval_seconds)
+                < datetime.now()
+            ):
+                await recalculate_load_control(hass, entry.entry_id)
+
+    # Subscribe to state changes for all relevant entities
+    entry.async_on_unload(
+        async_track_state_change_event(hass, entity_ids, state_automation_listener)
     )
 
+    # Subscribe to time-based recalculation
+    interval = timedelta(seconds=1)
+    entry.async_on_unload(
+        async_track_time_interval(hass, state_time_listener, interval)
+    )
+
+    # Store entry in hass.data for platform access
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = {
+        "entry": entry,
+        "config": CONFIGS[entry.entry_id],
+        "state": STATES[entry.entry_id],
+        "plan": PLANS[entry.entry_id],
+    }
+
+    # Register update listener for options changes
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+
+    # Forward entry setup to platforms
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
     return True
+
+
+async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload config entry when options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+    if unload_ok:
+        # Clean up this entry's data
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+
+        # Clear this entry's global state
+        if entry.entry_id in CONFIGS:
+            CONFIGS[entry.entry_id].controllable_loads.clear()
+            del CONFIGS[entry.entry_id]
+        if entry.entry_id in STATES:
+            STATES[entry.entry_id].controllable_loads.clear()
+            STATES[entry.entry_id].available_amps_history.clear()
+            del STATES[entry.entry_id]
+        if entry.entry_id in PLANS:
+            PLANS[entry.entry_id].controllable_loads.clear()
+            del PLANS[entry.entry_id]
+
+    return unload_ok
 
 
 def parse_config(domain_config):
@@ -192,175 +360,65 @@ def initialise_state(hass: HomeAssistant):
     _LOGGER.debug("Initialised state: %s", STATE)
 
 
-def subscribe_to_entity_changes(hass: HomeAssistant):
-    """Subscribes to required entity changes."""
-    entity_ids: list[str] = [CONFIG.house_consumption_amps_entity]
-    if (
-        CONFIG.allow_solar_consumption
-        and CONFIG.solar_generation_amps_entity is not None
-    ):
-        entity_ids.append(CONFIG.solar_generation_amps_entity)
+def _subscribe_to_entity_changes_DEPRECATED(hass: HomeAssistant):
+    """DEPRECATED: This function has been replaced by per-entry listeners in async_setup_entry.
 
-    for config in CONFIG.controllable_loads.values():
-        entity_ids.append(config.load_amps_entity)
-        if config.switch_entity is not None:
-            entity_ids.append(config.switch_entity)
-        if config.can_turn_on_entity is not None:
-            entity_ids.append(config.can_turn_on_entity)
-
-    async def state_automation_listener(event: Event[EventStateChangedData]) -> None:
-        if event.event_type != "state_changed":
-            return
-
-        # Update state based on entity changes
-        entity_id = event.data["entity_id"]
-        new_state = event.data.get("new_state")
-        if new_state is None:
-            return
-
-        if entity_id == CONFIG.house_consumption_amps_entity:
-            if new_state is not None and new_state.state not in (
-                "unknown",
-                "unavailable",
-            ):
-                STATE.house_consumption_amps = float(new_state.state)
-                await recalculate_load_control(hass)
-            else:
-                _LOGGER.error(
-                    "House consumption entity is unavailable, cutting all load for safety"
-                )
-                await safety_abort(hass)
-                return
-
-        elif entity_id == CONFIG.solar_generation_amps_entity:
-            if new_state is not None and new_state.state not in (
-                "unknown",
-                "unavailable",
-            ):
-                STATE.solar_generation_amps = float(new_state.state)
-            else:
-                STATE.solar_generation_amps = 0.0
-                _LOGGER.warning(
-                    "Solar generation entity is unavailable, assuming zero generation"
-                )
-        else:
-            # match to controllable loads
-            for config in CONFIG.controllable_loads.values():
-                load = STATE.controllable_loads[config.name]
-
-                if entity_id == config.switch_entity:
-                    _LOGGER.debug(
-                        "Switch entity %s changed to %s", entity_id, new_state.state
-                    )
-                    if new_state is not None and new_state.state not in (
-                        "unknown",
-                        "unavailable",
-                    ):
-                        load.is_on = new_state.state != STATE_OFF
-                    else:
-                        load.is_on = False
-                    if load.is_on and load.is_under_load_control:
-                        load.on_since = datetime.now()
-                    else:
-                        load.on_since = None
-
-                elif entity_id == config.load_amps_entity:
-                    if new_state is not None and new_state.state not in (
-                        "unknown",
-                        "unavailable",
-                    ):
-                        load.current_load_amps = float(new_state.state)
-                    else:
-                        load.current_load_amps = 0.0
-
-                elif (
-                    config.can_turn_on_entity is not None
-                    and entity_id == config.can_turn_on_entity
-                ):
-                    # Handle changes to can_turn_on_entity
-                    if new_state is not None and new_state.state not in (
-                        "unknown",
-                        "unavailable",
-                    ):
-                        load.can_turn_on = new_state.state == STATE_ON
-                        _LOGGER.debug(
-                            "Can turn on entity %s for load %s changed to %s (can_turn_on=%s)",
-                            entity_id,
-                            config.name,
-                            new_state.state,
-                            load.can_turn_on,
-                        )
-                    else:
-                        load.can_turn_on = False  # Safe default
-                        _LOGGER.warning(
-                            "Can turn on entity %s for load %s is %s, preventing turn on",
-                            entity_id,
-                            config.name,
-                            new_state.state,
-                        )
-
-    async def state_time_listener(now: datetime) -> None:
-        if CONFIG.enable_automatic_recalculation:
-            # Make sure we are recalculating at least the minimum interval
-            if (
-                STATE.last_recalculation is None
-                or STATE.last_recalculation
-                + timedelta(seconds=CONFIG.recalculate_interval_seconds)
-                < datetime.now()
-            ):
-                await recalculate_load_control(hass)
-
-    _LOGGER.debug("Subscribing... %s", entity_ids)
-    async_track_state_change_event(hass, entity_ids, state_automation_listener)
-
-    interval = timedelta(seconds=1)
-    async_track_time_interval(hass, state_time_listener, interval)
+    Subscribes to required entity changes.
+    """
+    # This function is no longer used - listeners are now created per-entry in async_setup_entry
 
 
-@bind_hass
 async def calculate_effective_available_power(
     hass: HomeAssistant,
+    entry_id: str,
 ) -> tuple[float, float]:
     """Calculate available power including power freed by underperforming loads."""
+    # Get per-entry config/state/plan
+    config = hass.data[DOMAIN][entry_id]["config"]
+    state = hass.data[DOMAIN][entry_id]["state"]
+    plan = hass.data[DOMAIN][entry_id]["plan"]
+
     max_safe_total_load_amps = 0
 
     # Allow grid import
     grid_maximum_amps = 0.0
-    if STATE.allow_grid_import:
-        grid_maximum_amps = CONFIG.max_grid_import_amps
-        max_safe_total_load_amps += CONFIG.max_grid_import_amps
+    if state.allow_grid_import:
+        grid_maximum_amps = config.max_grid_import_amps
+        max_safe_total_load_amps += config.max_grid_import_amps
 
     # Use solar generation amps directly
     capped_solar_generation_amps = 0.0
-    if CONFIG.allow_solar_consumption and STATE.solar_generation_amps > 0:
+    if config.allow_solar_consumption and state.solar_generation_amps > 0:
         capped_solar_generation_amps = min(
-            STATE.solar_generation_amps, CONFIG.max_solar_generation_amps
+            state.solar_generation_amps, config.max_solar_generation_amps
         )
-        max_safe_total_load_amps += CONFIG.max_solar_generation_amps
+        max_safe_total_load_amps += config.max_solar_generation_amps
 
     # Calculate total available power before accounting for loads
-    # This is what we want to track the minimum of
     now = datetime.now()
     total_available_power_amps = grid_maximum_amps + capped_solar_generation_amps
     # Safety cap to maximum total available load
     total_available_power_amps = min(
-        total_available_power_amps, CONFIG.max_total_load_amps
+        total_available_power_amps, config.max_total_load_amps
     )
 
     # Determine max window duration based on longest min_toggle_interval
     max_window_seconds = max(
-        config.min_toggle_interval_seconds
-        for config in CONFIG.controllable_loads.values()
+        (
+            lconfig.min_toggle_interval_seconds
+            for lconfig in config.controllable_loads.values()
+        ),
+        default=60,  # Default to 60 seconds if no controllable loads configured
     )
 
     # Accumulate the total unallocated power (before subtracting loads) into history
-    STATE.accumulate_unallocated_amps(total_available_power_amps, max_window_seconds)
+    state.accumulate_unallocated_amps(total_available_power_amps, max_window_seconds)
 
     # Subtract loads that are under load control, since we can manage those
-    total_load_not_under_control = STATE.house_consumption_amps
-    for load_name in STATE.controllable_loads:  # pylint: disable=consider-using-dict-items
-        load_state = STATE.controllable_loads[load_name]
-        load_plan = PLAN.controllable_loads.get(load_name)
+    total_load_not_under_control = state.house_consumption_amps
+    for load_name in state.controllable_loads:
+        load_state = state.controllable_loads[load_name]
+        load_plan = plan.controllable_loads.get(load_name)
 
         if load_state.is_under_load_control and load_state.is_on:
             current_load = load_state.current_load_amps
@@ -391,55 +449,93 @@ async def calculate_effective_available_power(
     )
 
     # Update entities instead of setting state directly
-    if DOMAIN in hass.data and "available_load_sensor" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["available_load_sensor"].update_value(total_available_amps)
-    if DOMAIN in hass.data and "uncontrolled_load_sensor" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["uncontrolled_load_sensor"].update_value(
-            total_load_not_under_control
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and "available_load_sensor" in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        hass.data[DOMAIN][entry_id]["entities"]["available_load_sensor"].update_value(
+            total_available_amps
         )
-    if DOMAIN in hass.data and "max_safe_load_sensor" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["max_safe_load_sensor"].update_value(max_safe_total_load_amps)
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and "uncontrolled_load_sensor" in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        hass.data[DOMAIN][entry_id]["entities"][
+            "uncontrolled_load_sensor"
+        ].update_value(total_load_not_under_control)
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and "max_safe_load_sensor" in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        hass.data[DOMAIN][entry_id]["entities"]["max_safe_load_sensor"].update_value(
+            max_safe_total_load_amps
+        )
 
     return total_available_amps, max_safe_total_load_amps
 
 
-@bind_hass
-async def recalculate_load_control(hass: HomeAssistant):
+async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
     """The core of the load control algorithm.
 
     This function is intentionally complex as it handles the complete load planning
     algorithm including priority management, power allocation, throttling, rate limiting,
     overload protection, and reactive reallocation.
     """
-    _LOGGER.info("Recalculating load control plan")
+    if entry_id not in hass.data.get(DOMAIN, {}):
+        _LOGGER.error("Entry %s not found in hass.data", entry_id)
+        return
+
+    config = hass.data[DOMAIN][entry_id]["config"]
+    state = hass.data[DOMAIN][entry_id]["state"]
+
+    _LOGGER.info("Recalculating load control plan for entry %s", entry_id)
     now = datetime.now()
-    STATE.last_recalculation = now
+    state.last_recalculation = now
 
     # Check if load control is enabled
-    if DOMAIN in hass.data and ENABLE_LOAD_CONTROL_SWITCH_ID in hass.data[DOMAIN]:
-        STATE.enable_load_control = hass.data[DOMAIN][
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and ENABLE_LOAD_CONTROL_SWITCH_ID in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        state.enable_load_control = hass.data[DOMAIN][entry_id]["entities"][
             ENABLE_LOAD_CONTROL_SWITCH_ID
         ].is_on
-    if not STATE.enable_load_control:
+    if not state.enable_load_control:
         _LOGGER.debug("Load control is disabled, skipping recalculation")
 
         # Reset load state
-        STATE.available_amps_history.clear()
-        for control in CONFIG.controllable_loads.values():
-            load = STATE.controllable_loads[control.name]
+        state.available_amps_history.clear()
+        for control in config.controllable_loads.values():
+            load = state.controllable_loads[control.name]
             load.is_under_load_control = True
             load.last_throttled = None
             load.last_toggled = None
         return
 
     # Clear safety abort state if system has recovered
-    if DOMAIN in hass.data and "safety_abort_sensor" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["safety_abort_sensor"].update_state(False)
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and "safety_abort_sensor" in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        hass.data[DOMAIN][entry_id]["entities"]["safety_abort_sensor"].update_state(
+            False
+        )
 
     # Check if allow grid import is enabled
-    STATE.allow_grid_import = False
-    if DOMAIN in hass.data and ALLOW_GRID_IMPORT_SWITCH_ID in hass.data[DOMAIN]:
-        STATE.allow_grid_import = hass.data[DOMAIN][ALLOW_GRID_IMPORT_SWITCH_ID].is_on
+    state.allow_grid_import = False
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and ALLOW_GRID_IMPORT_SWITCH_ID in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        state.allow_grid_import = hass.data[DOMAIN][entry_id]["entities"][
+            ALLOW_GRID_IMPORT_SWITCH_ID
+        ].is_on
 
     new_plan = PlanState()
 
@@ -447,7 +543,7 @@ async def recalculate_load_control(hass: HomeAssistant):
     (
         available_amps,
         max_safe_total_load_amps,
-    ) = await calculate_effective_available_power(hass)
+    ) = await calculate_effective_available_power(hass, entry_id)
     new_plan.available_amps = available_amps
 
     # Build priority list (lower number == more important)
@@ -611,7 +707,7 @@ async def recalculate_load_control(hass: HomeAssistant):
         if STATE.last_overload is None:
             STATE.last_overload = now
         if now >= STATE.last_overload + timedelta(
-            seconds=CONFIG.recalculate_interval_seconds * 3
+            seconds=CONFIG.recalculate_interval_seconds
         ):
             overload = True
             _LOGGER.warning(
@@ -639,16 +735,28 @@ async def recalculate_load_control(hass: HomeAssistant):
         STATE.last_overload = None
 
     # Update overload binary sensor
-    if DOMAIN in hass.data and "overload_sensor" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["overload_sensor"].update_state(overload)
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and "overload_sensor" in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        hass.data[DOMAIN][entry_id]["entities"]["overload_sensor"].update_state(
+            overload
+        )
 
     # Final pass to summarise plan
     new_plan.available_amps = available_amps
     for load_name in prioritised_loads:
         plan = new_plan.controllable_loads[load_name]
         new_plan.used_amps += plan.expected_load_amps
-    if DOMAIN in hass.data and "controlled_load_sensor" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["controlled_load_sensor"].update_value(new_plan.used_amps)
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and "controlled_load_sensor" in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        hass.data[DOMAIN][entry_id]["entities"]["controlled_load_sensor"].update_value(
+            new_plan.used_amps
+        )
 
     _LOGGER.debug(
         "Planning complete: available=%gA, used=%gA",
@@ -656,11 +764,10 @@ async def recalculate_load_control(hass: HomeAssistant):
         new_plan.used_amps,
     )
 
-    await execute_plan(hass, new_plan)
+    await execute_plan(hass, new_plan, entry_id)
 
 
-@bind_hass
-async def execute_plan(hass: HomeAssistant, plan: PlanState):
+async def execute_plan(hass: HomeAssistant, plan: PlanState, entry_id: str):
     """Changes entity states to achieve load control plan."""
     now = datetime.now()
 
@@ -676,7 +783,7 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
                 "Switch entity not configured for load %s, skipping control",
                 load_name,
             )
-            await safety_abort(hass)
+            await safety_abort(hass, entry_id)
             return
 
         switch_domain = parse_entity_domain(config.switch_entity)
@@ -722,7 +829,7 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
                 _LOGGER.error("Failed to turn off %s: %s", config.switch_entity, err)
 
                 # If we fail to turn off a load, abort all load control for safety
-                await safety_abort(hass)
+                await safety_abort(hass, entry_id)
                 return
 
         if (
@@ -789,38 +896,53 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState):
     _LOGGER.debug("Plan execution completed for %d loads", len(plan.controllable_loads))
 
 
-@bind_hass
-async def safety_abort(hass: HomeAssistant):
+async def safety_abort(hass: HomeAssistant, entry_id: str):
     """Cuts all load controlled by the integration in a safety situation."""
-    _LOGGER.error("Aborting load control, cutting all loads")
+    _LOGGER.error("Aborting load control, cutting all loads for entry %s", entry_id)
+
+    # Get per-entry config/state/plan
+    config = hass.data[DOMAIN][entry_id]["config"]
+    state = hass.data[DOMAIN][entry_id]["state"]
+    plan = hass.data[DOMAIN][entry_id]["plan"]
 
     # Update safety abort binary sensor
-    if DOMAIN in hass.data and "safety_abort_sensor" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["safety_abort_sensor"].update_state(True)
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and "safety_abort_sensor" in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        hass.data[DOMAIN][entry_id]["entities"]["safety_abort_sensor"].update_state(
+            True
+        )
 
-    if DOMAIN in hass.data and "enable_load_control" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["enable_load_control"].update_value(False)
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and "enable_load_control" in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        hass.data[DOMAIN][entry_id]["entities"]["enable_load_control"].update_value(
+            False
+        )
 
-    plan = PlanState()
     plan.available_amps = 0.0
     plan.used_amps = 0.0
-    for load_name in CONFIG.controllable_loads:  # pylint: disable=consider-using-dict-items
+    for load_name in config.controllable_loads:
         try:
-            config = CONFIG.controllable_loads[load_name]
-            switch_domain = parse_entity_domain(config.switch_entity)
+            lconfig = config.controllable_loads[load_name]
+            switch_domain = parse_entity_domain(lconfig.switch_entity)
             service_name = "turn_off"
             await hass.services.async_call(
                 switch_domain,
                 service_name,
-                {"entity_id": config.switch_entity},
+                {"entity_id": lconfig.switch_entity},
                 blocking=True,
             )
 
-            state = STATE.controllable_loads[load_name]
-            state.is_on = False
-            state.is_under_load_control = False
-            state.last_toggled = datetime.now()
-            state.last_throttled = datetime.now()
+            lstate = state.controllable_loads[load_name]
+            lstate.is_on = False
+            lstate.is_under_load_control = False
+            lstate.last_toggled = datetime.now()
+            lstate.last_throttled = datetime.now()
 
             load_plan = plan.controllable_loads[load_name] = ControllableLoadPlanState()
             load_plan.is_on = False

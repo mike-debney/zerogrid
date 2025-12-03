@@ -1,19 +1,193 @@
 {
     "config": {
-        "abort": {
-            "already_configured": "Device is already configured"
+        "step": {
+            "user": {
+                "title": "Basic configuration",
+                "data": {
+                    "name": "Name",
+                    "house_consumption_amps_entity": "House consumption sensor",
+                    "solar_generation_amps_entity": "Solar generation sensor (optional)",
+                    "enable_automatic_recalculation": "Enable periodic recalculation",
+                    "recalculate_interval_seconds": "Minimum recalculation interval (seconds)",
+                    "load_measurement_delay_seconds": "Load measurement delay (seconds)"
+                },
+                "data_description": {
+                    "name": "A unique name for this ZeroGrid instance (e.g., 'Main House', 'Guest House', 'Workshop')",
+                    "house_consumption_amps_entity": "Entity measuring total house consumption in amps. This is used to monitor overall electrical usage and trigger recalculations when consumption changes.",
+                    "solar_generation_amps_entity": "Optional entity measuring solar generation in amps. If provided, the system will prioritize using solar power and enable surplus solar modes for controllable loads. Leave blank if you don't have solar generation.",
+                    "enable_automatic_recalculation": "When enabled, the system will automatically recalculate the load control plan if the house consumption did not change over the specified interval. This complements event-driven recalculation based on house consumption readings.",
+                    "recalculate_interval_seconds": "Time interval for periodic recalculation of the load control plan.",
+                    "load_measurement_delay_seconds": "Time delay after turning on a load before using its actual measured consumption. During this period, the expected load value is used instead of the measured load to account for soft-starts, variable loads, and measurement delays."
+                }
+            },
+            "safety": {
+                "title": "Safety and electrical constraints",
+                "data": {
+                    "max_total_load_amps": "Maximum total load (amps)",
+                    "max_grid_import_amps": "Maximum grid import (amps)",
+                    "max_solar_generation_amps": "Maximum solar generation (amps)",
+                    "safety_margin_amps": "Safety margin (amps)",
+                    "hysteresis_amps": "Hysteresis (amps)"
+                },
+                "data_description": {
+                    "max_total_load_amps": "Maximum total load that your electrical system can handle. This is typically determined by your main circuit breaker rating.",
+                    "max_grid_import_amps": "Maximum amount of load allowed to be drawn from the grid. Set this to zero to prevent any grid import, or to a specific value to limit grid usage while allowing some backup power.",
+                    "max_solar_generation_amps": "Maximum solar generation capacity in amps. This should typically match your solar inverter's maximum output.",
+                    "safety_margin_amps": "Safety buffer above the maximum load threshold. When total consumption exceeds max_total_load_amps + safety_margin_amps for longer than the recalculate interval, the system will trigger overload protection by immediately shedding controllable loads in reverse priority.",
+                    "hysteresis_amps": "Hysteresis value in amps to reduce oscillations and improve stability."
+                }
+            },
+            "loads": {
+                "title": "Configure controllable loads",
+                "description": "How many controllable loads do you want to configure?",
+                "data": {
+                    "num_loads": "Number of loads"
+                }
+            },
+            "load_config": {
+                "title": "Configure load {load_number} of {total_loads | int}",
+                "description": "Configure the parameters for this controllable load.",
+                "data": {
+                    "name": "Load name",
+                    "max_controllable_load_amps": "Maximum load (amps)",
+                    "min_controllable_load_amps": "Minimum load (amps)",
+                    "min_toggle_interval_seconds": "Minimum toggle interval (seconds)",
+                    "min_throttle_interval_seconds": "Minimum throttle interval (seconds)",
+                    "load_amps_entity": "Load current sensor",
+                    "switch_entity": "Switch entity",
+                    "throttle_amps_entity": "Throttle control entity (optional)",
+                    "can_turn_on_entity": "Can turn on constraint entity (optional)"
+                },
+                "data_description": {
+                    "name": "Unique name for the load",
+                    "max_controllable_load_amps": "Maximum power this load can consume",
+                    "min_controllable_load_amps": "Minimum power needed (same as max for non-throttleable loads)",
+                    "min_toggle_interval_seconds": "Minimum time between on/off switches to reduce contactor wear",
+                    "min_throttle_interval_seconds": "Minimum time between throttle adjustments",
+                    "load_amps_entity": "Sensor measuring actual consumption in amps",
+                    "switch_entity": "Switch entity to the load on or off",
+                    "throttle_amps_entity": "Number entity to control throttle level (leave blank to disable throttling)",
+                    "can_turn_on_entity": "Optional binary sensor or input_boolean that must be 'on' for the load to be turned on by load management"
+                }
+            }
         },
         "error": {
             "cannot_connect": "Failed to connect",
             "invalid_auth": "Invalid authentication",
             "unknown": "Unexpected error"
         },
+        "abort": {
+            "already_configured": "Device is already configured"
+        }
+    },
+    "options": {
         "step": {
-            "user": {
+            "menu": {
+                "title": "ZeroGrid configuration",
+                "menu_options": {
+                    "monitoring": "Basic configuration",
+                    "safety": "Safety and electrical constraints",
+                    "manage_loads": "Configure controllable loads"
+                }
+            },
+            "monitoring": {
+                "title": "Basic configuration",
                 "data": {
-                    "host": "Host",
-                    "password": "Password",
-                    "username": "Username"
+                    "house_consumption_amps_entity": "House consumption sensor",
+                    "solar_generation_amps_entity": "Solar generation sensor (optional)",
+                    "enable_automatic_recalculation": "Enable periodic recalculation",
+                    "recalculate_interval_seconds": "Minimum recalculation interval (seconds)",
+                    "load_measurement_delay_seconds": "Load measurement delay (seconds)"
+                },
+                "data_description": {
+                    "house_consumption_amps_entity": "Entity measuring total house consumption in amps. This is used to monitor overall electrical usage and trigger recalculations when consumption changes.",
+                    "solar_generation_amps_entity": "Optional entity measuring solar generation in amps. If provided, the system will prioritize using solar power and enable surplus solar modes for controllable loads. Leave blank if you don't have solar generation.",
+                    "enable_automatic_recalculation": "When enabled, the system will automatically recalculate the load control plan if the house consumption did not change over the specified interval. This complements event-driven recalculation based on house consumption readings.",
+                    "recalculate_interval_seconds": "Time interval for periodic recalculation of the load control plan.",
+                    "load_measurement_delay_seconds": "Time delay after turning on a load before using its actual measured consumption. During this period, the expected load value is used instead of the measured load to account for soft-starts, variable loads, and measurement delays."
+                }
+            },
+            "safety": {
+                "title": "Safety and electrical constraints",
+                "data": {
+                    "max_total_load_amps": "Maximum total load (amps)",
+                    "max_grid_import_amps": "Maximum grid import (amps)",
+                    "max_solar_generation_amps": "Maximum solar generation (amps)",
+                    "safety_margin_amps": "Safety margin (amps)",
+                    "hysteresis_amps": "Hysteresis (amps)"
+                },
+                "data_description": {
+                    "max_total_load_amps": "Maximum total load that your electrical system can handle. This is typically determined by your main circuit breaker rating.",
+                    "max_grid_import_amps": "Maximum amount of load allowed to be drawn from the grid. Set this to zero to prevent any grid import, or to a specific value to limit grid usage while allowing some backup power.",
+                    "max_solar_generation_amps": "Maximum solar generation capacity in amps. This should typically match your solar inverter's maximum output.",
+                    "safety_margin_amps": "Safety buffer above the maximum load threshold. When total consumption exceeds max_total_load_amps + safety_margin_amps for longer than the recalculate interval, the system will trigger overload protection by immediately shedding controllable loads in reverse priority.",
+                    "hysteresis_amps": "Hysteresis value in amps to reduce oscillations and improve stability."
+                }
+            },
+            "manage_loads": {
+                "title": "Configure controllable loads",
+                "menu_options": {
+                    "add_load": "Add new load",
+                    "select_load_to_edit": "Edit or delete existing load",
+                    "menu": "Done"
+                }
+            },
+            "add_load": {
+                "title": "Add new load",
+                "data": {
+                    "name": "Load name",
+                    "max_controllable_load_amps": "Maximum load (amps)",
+                    "min_controllable_load_amps": "Minimum load (amps)",
+                    "min_toggle_interval_seconds": "Minimum toggle interval (seconds)",
+                    "load_amps_entity": "Load current sensor",
+                    "switch_entity": "Switch entity",
+                    "throttle_amps_entity": "Throttle control entity (optional)",
+                    "min_throttle_interval_seconds": "Minimum throttle interval (seconds)",
+                    "can_turn_on_entity": "Can turn on constraint entity (optional)"
+                },
+                "data_description": {
+                    "name": "Unique name for the load",
+                    "max_controllable_load_amps": "Maximum power this load can consume",
+                    "min_controllable_load_amps": "Minimum power needed (same as max for non-throttleable loads)",
+                    "min_toggle_interval_seconds": "Minimum time between on/off switches to reduce contactor wear",
+                    "load_amps_entity": "Sensor measuring actual consumption in amps",
+                    "switch_entity": "Switch entity to the load on or off",
+                    "throttle_amps_entity": "Number entity to control throttle level (leave blank to disable throttling)",
+                    "min_throttle_interval_seconds": "Minimum time between throttle adjustments",
+                    "can_turn_on_entity": "Optional binary sensor or input_boolean that must be 'on' for the load to be turned on by load management"
+                }
+            },
+            "select_load_to_edit": {
+                "title": "Select load to edit",
+                "data": {
+                    "load_to_edit": "Load to edit"
+                }
+            },
+            "edit_load": {
+                "title": "Edit load: {load_name}",
+                "data": {
+                    "name": "Load name",
+                    "max_controllable_load_amps": "Maximum load (amps)",
+                    "min_controllable_load_amps": "Minimum load (amps)",
+                    "min_toggle_interval_seconds": "Minimum toggle interval (seconds)",
+                    "load_amps_entity": "Load current sensor",
+                    "switch_entity": "Switch entity",
+                    "throttle_amps_entity": "Throttle control entity (optional)",
+                    "min_throttle_interval_seconds": "Minimum throttle interval (seconds)",
+                    "can_turn_on_entity": "Can turn on constraint entity (optional)",
+                    "delete_load": "Delete this load"
+                },
+                "data_description": {
+                    "name": "Unique name for the load",
+                    "max_controllable_load_amps": "Maximum power this load can consume",
+                    "min_controllable_load_amps": "Minimum power needed (same as max for non-throttleable loads)",
+                    "min_toggle_interval_seconds": "Minimum time between on/off switches to reduce contactor wear",
+                    "load_amps_entity": "Sensor measuring actual consumption in amps",
+                    "switch_entity": "Switch entity to the load on or off",
+                    "throttle_amps_entity": "Number entity to control throttle level (leave blank to disable throttling)",
+                    "min_throttle_interval_seconds": "Minimum time between throttle adjustments",
+                    "can_turn_on_entity": "Optional binary sensor or input_boolean that must be 'on' for the load to be turned on by load management",
+                    "delete_load": "Check this box to delete this load from the configuration"
                 }
             }
         }

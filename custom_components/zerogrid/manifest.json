@@ -1,11 +1,14 @@
 {
-  "domain": "zerogrid",
-  "name": "ZeroGrid",
-  "codeowners": ["@mike-debney"],
-  "config_flow": false,
-  "documentation": "https://www.home-assistant.io/integrations/zerogrid",
-  "iot_class": "calculated",
-  "quality_scale": "bronze",
-  "requirements": [],
-  "version": "1.0.0"
+    "domain": "zerogrid",
+    "name": "ZeroGrid",
+    "codeowners": [
+        "@mike-debney"
+    ],
+    "config_flow": true,
+    "documentation": "https://github.com/mike-debney/zerogrid",
+    "iot_class": "calculated",
+    "quality_scale": "bronze",
+    "requirements": [],
+    "version": "0.0.1",
+    "integration_type": "device"
 }

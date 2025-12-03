@@ -8,31 +8,36 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from .const import DEVICE_INFO, DOMAIN
+from .const import DOMAIN, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_platform(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config: ConfigType,
+    entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up the ZeroGrid binary sensor platform."""
     _LOGGER.debug("Setting up ZeroGrid binary sensor platform")
 
-    overload_sensor = OverloadBinarySensor()
-    safety_abort_sensor = SafetyAbortBinarySensor()
+    device_info = get_device_info(entry)
 
-    # Store reference in hass.data for updates
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN]["overload_sensor"] = overload_sensor
-    hass.data[DOMAIN]["safety_abort_sensor"] = safety_abort_sensor
+    overload_sensor = OverloadBinarySensor(entry, device_info)
+    safety_abort_sensor = SafetyAbortBinarySensor(entry, device_info)
+
+    # Store entity references in the entry-specific data
+    if "entities" not in hass.data[DOMAIN][entry.entry_id]:
+        hass.data[DOMAIN][entry.entry_id]["entities"] = {}
+
+    hass.data[DOMAIN][entry.entry_id]["entities"]["overload_sensor"] = overload_sensor
+    hass.data[DOMAIN][entry.entry_id]["entities"]["safety_abort_sensor"] = (
+        safety_abort_sensor
+    )
 
     async_add_entities([overload_sensor, safety_abort_sensor])
 
@@ -44,12 +49,12 @@ class OverloadBinarySensor(BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_should_poll = False
 
-    def __init__(self) -> None:
+    def __init__(self, entry: ConfigEntry, device_info) -> None:
         """Initialize the binary sensor."""
         self._attr_name = "Overload"
-        self._attr_unique_id = f"{DOMAIN}_overload"
+        self._attr_unique_id = f"{entry.entry_id}_overload"
         self._attr_is_on = False
-        self._attr_device_info = DEVICE_INFO
+        self._attr_device_info = device_info
 
     @callback
     def update_state(self, is_overload: bool) -> None:
@@ -65,12 +70,12 @@ class SafetyAbortBinarySensor(BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_should_poll = False
 
-    def __init__(self) -> None:
+    def __init__(self, entry: ConfigEntry, device_info) -> None:
         """Initialize the binary sensor."""
         self._attr_name = "Safety abort"
-        self._attr_unique_id = f"{DOMAIN}_safety_abort"
+        self._attr_unique_id = f"{entry.entry_id}_safety_abort"
         self._attr_is_on = False
-        self._attr_device_info = DEVICE_INFO
+        self._attr_device_info = device_info
 
     @callback
     def update_state(self, is_abort: bool) -> None:

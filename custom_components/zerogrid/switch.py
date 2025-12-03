@@ -6,38 +6,45 @@ import logging
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from . import CONFIG, STATE, recalculate_load_control
 from .const import (
     ALLOW_GRID_IMPORT_SWITCH_ID,
-    DEVICE_INFO,
     DOMAIN,
     ENABLE_LOAD_CONTROL_SWITCH_ID,
+    get_device_info,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_platform(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config: ConfigType,
+    entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up the ZeroGrid switch platform."""
     _LOGGER.debug("Setting up ZeroGrid switch platform")
 
-    enable_switch = EnableLoadControlSwitch()
-    allow_grid_import_switch = AllowGridImportSwitch()
+    device_info = get_device_info(entry)
 
-    # Store references in hass.data for updates
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][ENABLE_LOAD_CONTROL_SWITCH_ID] = enable_switch
-    hass.data[DOMAIN][ALLOW_GRID_IMPORT_SWITCH_ID] = allow_grid_import_switch
+    enable_switch = EnableLoadControlSwitch(entry, device_info)
+    allow_grid_import_switch = AllowGridImportSwitch(entry, device_info)
+
+    # Store entity references in the entry-specific data
+    if "entities" not in hass.data[DOMAIN][entry.entry_id]:
+        hass.data[DOMAIN][entry.entry_id]["entities"] = {}
+
+    hass.data[DOMAIN][entry.entry_id]["entities"][ENABLE_LOAD_CONTROL_SWITCH_ID] = (
+        enable_switch
+    )
+    hass.data[DOMAIN][entry.entry_id]["entities"][ALLOW_GRID_IMPORT_SWITCH_ID] = (
+        allow_grid_import_switch
+    )
 
     async_add_entities([enable_switch, allow_grid_import_switch])
 
@@ -49,11 +56,12 @@ class EnableLoadControlSwitch(SwitchEntity, RestoreEntity):
     _attr_should_poll = False
     _attr_is_on: bool
 
-    def __init__(self) -> None:
+    def __init__(self, entry: ConfigEntry, device_info) -> None:
         """Initialize the switch."""
+        self.entry = entry
         self._attr_name = "Enable load control"
-        self._attr_unique_id = ENABLE_LOAD_CONTROL_SWITCH_ID
-        self._attr_device_info = DEVICE_INFO
+        self._attr_unique_id = f"{entry.entry_id}_enable_load_control"
+        self._attr_device_info = device_info
         # Don't set _attr_is_on here - let it be restored in async_added_to_hass
 
     async def async_added_to_hass(self) -> None:
@@ -92,7 +100,7 @@ class EnableLoadControlSwitch(SwitchEntity, RestoreEntity):
         if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
             STATE.enable_load_control = self._attr_is_on
             if CONFIG.enable_automatic_recalculation:
-                await recalculate_load_control(self.hass)
+                await recalculate_load_control(self.hass, self.entry.entry_id)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
@@ -122,11 +130,12 @@ class AllowGridImportSwitch(SwitchEntity, RestoreEntity):
     _attr_should_poll = False
     _attr_is_on: bool
 
-    def __init__(self) -> None:
+    def __init__(self, entry: ConfigEntry, device_info) -> None:
         """Initialize the switch."""
+        self.entry = entry
         self._attr_name = "Allow grid import"
-        self._attr_unique_id = ALLOW_GRID_IMPORT_SWITCH_ID
-        self._attr_device_info = DEVICE_INFO
+        self._attr_unique_id = f"{entry.entry_id}_allow_grid_import"
+        self._attr_device_info = device_info
         # Don't set _attr_is_on here - let it be restored in async_added_to_hass
 
     async def async_added_to_hass(self) -> None:
@@ -165,7 +174,7 @@ class AllowGridImportSwitch(SwitchEntity, RestoreEntity):
         if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
             STATE.allow_grid_import = self._attr_is_on
             if CONFIG.enable_automatic_recalculation:
-                await recalculate_load_control(self.hass)
+                await recalculate_load_control(self.hass, self.entry.entry_id)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Allow grid import."""
