@@ -279,7 +279,7 @@ class ZeroGridOptionsFlow(OptionsFlow):
         """Show main options menu."""
         return self.async_show_menu(
             step_id="menu",
-            menu_options=["monitoring", "safety", "manage_loads"],
+            menu_options=["monitoring", "safety", "manage_loads", "reorder_loads"],
         )
 
     async def async_step_monitoring(
@@ -413,6 +413,72 @@ class ZeroGridOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="safety", data_schema=schema)
+
+    async def async_step_reorder_loads(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Reorder controllable loads priority."""
+        current_config = {**self.config_entry.data, **self.config_entry.options}
+        current_loads = current_config.get("controllable_loads", [])
+
+        if not current_loads:
+            # No loads to reorder
+            return await self.async_step_menu()
+
+        errors = {}
+        if user_input is not None:
+            # Build new order based on user selections
+            # Create a mapping of load names to load configs
+            load_map = {load["name"]: load for load in current_loads}
+
+            # Collect the selected order
+            selected_names = []
+            for i in range(len(current_loads)):
+                position_key = f"position_{i}"
+                if position_key in user_input:
+                    selected_names.append(user_input[position_key])
+
+            # Check for duplicates
+            if len(selected_names) != len(set(selected_names)):
+                errors["base"] = "duplicate_load"
+            else:
+                # Build reordered list
+                reordered_loads = []
+                for name in selected_names:
+                    if name in load_map:
+                        reordered_loads.append(load_map[name])
+
+                # Ensure all loads are included (shouldn't happen but be safe)
+                for load in current_loads:
+                    if load not in reordered_loads:
+                        reordered_loads.append(load)
+
+                updated_options = {
+                    **current_config,
+                    "controllable_loads": reordered_loads,
+                }
+                return self.async_create_entry(title="", data=updated_options)
+
+        # Build schema with select boxes for each position
+        load_names = [load["name"] for load in current_loads]
+        schema_dict = {}
+
+        for i, load in enumerate(current_loads):
+            schema_dict[vol.Required(f"position_{i}", default=load["name"])] = (
+                selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=load_names,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                )
+            )
+
+        schema = vol.Schema(schema_dict)
+        return self.async_show_form(
+            step_id="reorder_loads",
+            data_schema=schema,
+            errors=errors,
+        )
 
     async def async_step_manage_loads(
         self, user_input: dict[str, Any] | None = None
@@ -608,7 +674,6 @@ class ZeroGridOptionsFlow(OptionsFlow):
                     min=1, mode=selector.NumberSelectorMode.BOX
                 )
             ),
-            vol.Required("delete_load", default=False): selector.BooleanSelector(),
         }
 
         # Add optional entity fields with defaults only if they exist
@@ -639,6 +704,11 @@ class ZeroGridOptionsFlow(OptionsFlow):
             schema_fields[vol.Optional("can_turn_on_entity")] = selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean"])
             )
+
+        # Add delete_load at the bottom
+        schema_fields[vol.Required("delete_load", default=False)] = (
+            selector.BooleanSelector()
+        )
 
         schema = vol.Schema(schema_fields)
         return self.async_show_form(

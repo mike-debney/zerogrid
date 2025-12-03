@@ -45,7 +45,7 @@
                 }
             },
             "load_config": {
-                "title": "Configure load {load_number} of {total_loads | int}",
+                "title": "Configure load {load_number} of {total_loads}",
                 "description": "Configure the parameters for this controllable load.",
                 "data": {
                     "name": "Load name",
@@ -74,7 +74,8 @@
         "error": {
             "cannot_connect": "Failed to connect",
             "invalid_auth": "Invalid authentication",
-            "unknown": "Unexpected error"
+            "unknown": "Unexpected error",
+            "duplicate_load": "Each load must be selected exactly once. Please ensure no load appears in multiple positions."
         },
         "abort": {
             "already_configured": "Device is already configured"
@@ -87,7 +88,8 @@
                 "menu_options": {
                     "monitoring": "Basic configuration",
                     "safety": "Safety and electrical constraints",
-                    "manage_loads": "Configure controllable loads"
+                    "manage_loads": "Configure controllable loads",
+                    "reorder_loads": "Controllable load prioritisation"
                 }
             },
             "monitoring": {
@@ -189,6 +191,10 @@
                     "can_turn_on_entity": "Optional binary sensor or input_boolean that must be 'on' for the load to be turned on by load management",
                     "delete_load": "Check this box to delete this load from the configuration"
                 }
+            },
+            "reorder_loads": {
+                "title": "Reorder load priority",
+                "description": "Set the priority for each position. Loads in higher positions will be prioritized for turning on first and turning off last. Position 0 has the highest priority."
             }
         }
     }

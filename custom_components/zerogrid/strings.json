@@ -45,7 +45,7 @@
                 }
             },
             "load_config": {
-                "title": "Configure load {load_number} of {total_loads | int}",
+                "title": "Configure load {load_number} of {total_loads}",
                 "description": "Configure the parameters for this controllable load.",
                 "data": {
                     "name": "Load name",
@@ -74,7 +74,8 @@
         "error": {
             "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
             "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-            "unknown": "[%key:common::config_flow::error::unknown%]"
+            "unknown": "[%key:common::config_flow::error::unknown%]",
+            "duplicate_load": "Each load must be selected exactly once. Please ensure no load appears in multiple positions."
         },
         "abort": {
             "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
@@ -87,7 +88,8 @@
                 "menu_options": {
                     "monitoring": "[%key:component::zerogrid::config::step::user::title%]",
                     "safety": "[%key:component::zerogrid::config::step::safety::title%]",
-                    "manage_loads": "[%key:component::zerogrid::config::step::loads::title%]"
+                    "manage_loads": "[%key:component::zerogrid::config::step::loads::title%]",
+                    "reorder_loads": "Controllable load prioritisation"
                 }
             },
             "monitoring": {
@@ -189,6 +191,10 @@
                     "can_turn_on_entity": "[%key:component::zerogrid::config::step::load_config::data_description::can_turn_on_entity%]",
                     "delete_load": "Check this box to delete this load from the configuration"
                 }
+            },
+            "reorder_loads": {
+                "title": "Reorder load priority",
+                "description": "Set the priority for each position. Loads in higher positions will be prioritized for turning on first and turning off last. Position 0 has the highest priority."
             }
         }
     }
