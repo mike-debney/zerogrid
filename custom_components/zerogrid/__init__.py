@@ -109,6 +109,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "unavailable",
             ):
                 state.house_consumption_amps = float(new_state.state)
+                state.house_consumption_initialised = True
                 await recalculate_load_control(hass, entry.entry_id)
             else:
                 _LOGGER.error(
@@ -122,6 +123,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "unavailable",
             ):
                 state.solar_generation_amps = float(new_state.state)
+                state.solar_generation_initialised = True
                 await recalculate_load_control(hass, entry.entry_id)
             else:
                 state.solar_generation_amps = 0.0
@@ -499,6 +501,14 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
 
     config = hass.data[DOMAIN][entry_id]["config"]
     state = hass.data[DOMAIN][entry_id]["state"]
+    if not state.house_consumption_initialised or (
+        config.allow_solar_consumption and not state.solar_generation_initialised
+    ):
+        _LOGGER.debug(
+            "Recalculation skipped - house consumption or solar generation not initialised for entry %s",
+            entry_id,
+        )
+        return
 
     now = datetime.now()
     if state.last_recalculation is not None and (
@@ -918,6 +928,12 @@ async def safety_abort(hass: HomeAssistant, entry_id: str):
     config = hass.data[DOMAIN][entry_id]["config"]
     state = hass.data[DOMAIN][entry_id]["state"]
     plan = hass.data[DOMAIN][entry_id]["plan"]
+
+    # Skip abort if state is not initialised yet
+    if not state.house_consumption_initialised or (
+        config.allow_solar_consumption and not state.solar_generation_initialised
+    ):
+        return
 
     # Update safety abort binary sensor
     if (

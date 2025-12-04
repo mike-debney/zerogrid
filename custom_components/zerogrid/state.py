@@ -56,6 +56,8 @@ class State:
         self.last_overload: datetime | None = None
         self.last_recalculation: datetime | None = None
         self.available_amps_history: deque[tuple[datetime, float]] = deque(maxlen=100)
+        self.solar_generation_initialised: bool = False
+        self.house_consumption_initialised: bool = False
 
     def accumulate_unallocated_amps(
         self,
