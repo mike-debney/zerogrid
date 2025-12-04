@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+import math
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON, Platform
@@ -701,7 +702,7 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 available_amps + previously_allocated_amps,
                 config.max_controllable_load_amps,
             )
-            will_consume_amps = round(will_consume_amps)
+            will_consume_amps = math.floor(will_consume_amps)
             plan.throttle_amps = will_consume_amps
 
             available_amps += previously_allocated_amps - will_consume_amps
