@@ -712,7 +712,9 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 available_amps + previously_allocated_amps,
                 config.max_controllable_load_amps,
             )
-            will_consume_amps = math.floor(will_consume_amps)
+            will_consume_amps = max(
+                math.floor(will_consume_amps), config.min_controllable_load_amps
+            )
             plan.throttle_amps = will_consume_amps
 
             available_amps += previously_allocated_amps - will_consume_amps
