@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from . import CONFIG, STATE, recalculate_load_control
+from . import recalculate_load_control, reset_load_control_state
 from .const import (
     ALLOW_GRID_IMPORT_SWITCH_ID,
     DOMAIN,
@@ -98,9 +98,17 @@ class EnableLoadControlSwitch(SwitchEntity, RestoreEntity):
     async def _update_integration_state(self) -> None:
         """Update the integration's STATE and trigger recalculation."""
         if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
-            STATE.enable_load_control = self._attr_is_on
-            if CONFIG.enable_automatic_recalculation:
-                await recalculate_load_control(self.hass, self.entry.entry_id)
+            # Get the entry-specific config and state
+            entry_data = self.hass.data[DOMAIN].get(self.entry.entry_id)
+            if entry_data:
+                config = entry_data["config"]
+                state = entry_data["state"]
+
+                state.enable_load_control = self._attr_is_on
+                # Reset load control state when toggling
+                reset_load_control_state(config, state)
+                if config.enable_automatic_recalculation:
+                    await recalculate_load_control(self.hass, self.entry.entry_id)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
@@ -172,9 +180,15 @@ class AllowGridImportSwitch(SwitchEntity, RestoreEntity):
     async def _update_integration_state(self) -> None:
         """Update the integration's STATE and trigger recalculation."""
         if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
-            STATE.allow_grid_import = self._attr_is_on
-            if CONFIG.enable_automatic_recalculation:
-                await recalculate_load_control(self.hass, self.entry.entry_id)
+            # Get the entry-specific config and state
+            entry_data = self.hass.data[DOMAIN].get(self.entry.entry_id)
+            if entry_data:
+                config = entry_data["config"]
+                state = entry_data["state"]
+
+                state.allow_grid_import = self._attr_is_on
+                if config.enable_automatic_recalculation:
+                    await recalculate_load_control(self.hass, self.entry.entry_id)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Allow grid import."""

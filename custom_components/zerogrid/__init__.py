@@ -475,6 +475,16 @@ async def calculate_effective_available_power(
     return total_available_amps, max_safe_total_load_amps
 
 
+def reset_load_control_state(config: Config, state: State) -> None:
+    """Reset load control state when load control is disabled or re-enabled."""
+    state.available_amps_history.clear()
+    for control in config.controllable_loads.values():
+        load = state.controllable_loads[control.name]
+        load.is_under_load_control = True
+        load.last_throttled = None
+        load.last_toggled = None
+
+
 async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
     """The core of the load control algorithm.
 
@@ -500,7 +510,6 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
     state.last_recalculation = now
 
     _LOGGER.info("Recalculating load control plan for entry %s", entry_id)
-
     # Check if load control is enabled
     if (
         entry_id in hass.data.get(DOMAIN, {})
@@ -512,14 +521,7 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
         ].is_on
     if not state.enable_load_control:
         _LOGGER.debug("Load control is disabled, skipping recalculation")
-
-        # Reset load state
-        state.available_amps_history.clear()
-        for control in config.controllable_loads.values():
-            load = state.controllable_loads[control.name]
-            load.is_under_load_control = True
-            load.last_throttled = None
-            load.last_toggled = None
+        reset_load_control_state(config, state)
         return
 
     # Clear safety abort state if system has recovered
