@@ -489,9 +489,17 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
     config = hass.data[DOMAIN][entry_id]["config"]
     state = hass.data[DOMAIN][entry_id]["state"]
 
-    _LOGGER.info("Recalculating load control plan for entry %s", entry_id)
     now = datetime.now()
+    if state.last_recalculation is not None and (
+        state.last_recalculation + timedelta(seconds=1) > now
+    ):
+        _LOGGER.debug(
+            "Recalculation skipped due to interval limit for entry %s", entry_id
+        )
+        return
     state.last_recalculation = now
+
+    _LOGGER.info("Recalculating load control plan for entry %s", entry_id)
 
     # Check if load control is enabled
     if (
