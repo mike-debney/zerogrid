@@ -622,9 +622,10 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 should_be_on = False
 
         if state.is_switch_rate_limited:
-            _LOGGER.debug(
-                "Unable to change load %s due to switch rate limit", load_name
-            )
+            if should_be_on != previous_plan.is_on or state.is_on:
+                _LOGGER.debug(
+                    "Unable to toggle load %s due to switch rate limit", load_name
+                )
             plan.is_on = previous_plan.is_on or state.is_on
         else:
             plan.is_on = should_be_on
@@ -646,7 +647,9 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
         else:
             will_consume_amps = 0.0
 
-        # Account for loads that are on but may be drawing less than expected
+        # For loads that have been on long enough, use measured current instead of allocation
+        # These loads are already subtracted in calculate_effective_available_power,
+        # so we add back the allocation and don't subtract the measured value
         if (
             plan.is_on
             and state.on_since is not None
@@ -654,10 +657,12 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
             + timedelta(seconds=CONFIG.load_measurement_delay_seconds)
             < now
         ):
-            will_consume_amps = state.current_load_amps
+            available_amps += will_consume_amps  # Free up the allocation
+            will_consume_amps = state.current_load_amps  # Track actual consumption
+        else:
+            available_amps -= will_consume_amps  # Reserve power for this load
 
         plan.expected_load_amps = will_consume_amps
-        available_amps -= will_consume_amps
 
     # Second pass to allocate any remaining available power by throttling loads up from their minimum
     if available_amps > 0:
