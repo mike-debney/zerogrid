@@ -140,14 +140,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             load_config.name,
                             new_state.state,
                         )
-                        await recalculate_load_control(hass, entry.entry_id)
                 elif entity_id == load_config.load_amps_entity:
                     if new_state is not None and new_state.state not in (
                         "unknown",
                         "unavailable",
                     ):
                         load.current_load_amps = float(new_state.state)
-                        await recalculate_load_control(hass, entry.entry_id)
                 elif (
                     load_config.can_turn_on_entity is not None
                     and entity_id == load_config.can_turn_on_entity
