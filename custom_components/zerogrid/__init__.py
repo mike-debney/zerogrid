@@ -918,7 +918,6 @@ async def clear_safety_abort(hass: HomeAssistant, entry_id: str):
 
 async def safety_abort(hass: HomeAssistant, entry_id: str, force: bool = False):
     """Cuts all load controlled by the integration in a safety situation."""
-    _LOGGER.error("Aborting load control, cutting all loads for entry %s", entry_id)
 
     # Get per-entry config/state/plan
     config = hass.data[DOMAIN][entry_id]["config"]
@@ -941,6 +940,7 @@ async def safety_abort(hass: HomeAssistant, entry_id: str, force: bool = False):
         state.safety_abort_timestamp = now
     if now < state.safety_abort_timestamp + timedelta(seconds=60) and not force:
         return
+    _LOGGER.error("Aborting load control, cutting all loads for entry %s", entry_id)
 
     # Update safety abort binary sensor
     if (
