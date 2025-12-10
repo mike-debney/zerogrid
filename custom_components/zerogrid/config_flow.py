@@ -623,78 +623,96 @@ class ZeroGridOptionsFlow(OptionsFlow):
         throttle_entity = current_load.get("throttle_amps_entity")
         can_turn_on = current_load.get("can_turn_on_entity")
 
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    "name", default=current_load.get("name", "")
-                ): selector.TextSelector(),
-                vol.Required(
-                    "max_controllable_load_amps",
-                    default=current_load.get("max_controllable_load_amps", 0),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0, mode=selector.NumberSelectorMode.BOX
-                    )
+        # Build schema fields conditionally based on whether optional entities have values
+        schema_fields: dict[vol.Marker, Any] = {
+            vol.Required(
+                "name", default=current_load.get("name", "")
+            ): selector.TextSelector(),
+            vol.Required(
+                "max_controllable_load_amps",
+                default=current_load.get("max_controllable_load_amps", 0),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+            vol.Required(
+                "min_controllable_load_amps",
+                default=current_load.get("min_controllable_load_amps", 0),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+            vol.Required(
+                "load_amps_entity",
+                default=current_load.get("load_amps_entity"),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["sensor", "input_number"])
+            ),
+            vol.Required(
+                "switch_entity",
+                default=current_load.get("switch_entity"),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["switch", "input_boolean", "climate"]
+                )
+            ),
+            vol.Required(
+                "min_toggle_interval_seconds",
+                default=current_load.get(
+                    "min_toggle_interval_seconds", DEFAULT_MIN_TOGGLE_INTERVAL
                 ),
-                vol.Required(
-                    "min_controllable_load_amps",
-                    default=current_load.get("min_controllable_load_amps", 0),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0, mode=selector.NumberSelectorMode.BOX
-                    )
-                ),
-                vol.Required(
-                    "load_amps_entity",
-                    default=current_load.get("load_amps_entity"),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["sensor", "input_number"])
-                ),
-                vol.Required(
-                    "switch_entity",
-                    default=current_load.get("switch_entity"),
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain=["switch", "input_boolean", "climate"]
-                    )
-                ),
-                vol.Required(
-                    "min_toggle_interval_seconds",
-                    default=current_load.get(
-                        "min_toggle_interval_seconds", DEFAULT_MIN_TOGGLE_INTERVAL
-                    ),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0, mode=selector.NumberSelectorMode.BOX
-                    )
-                ),
-                vol.Optional(
-                    "throttle_amps_entity",
-                    default=throttle_entity,
-                ): selector.EntitySelector(
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+        }
+
+        # Add optional fields with default only if they exist
+        if throttle_entity:
+            schema_fields[
+                vol.Optional("throttle_amps_entity", default=throttle_entity)
+            ] = selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["number", "input_number"])
+            )
+        else:
+            schema_fields[vol.Optional("throttle_amps_entity")] = (
+                selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["number", "input_number"])
+                )
+            )
+
+        schema_fields[
+            vol.Optional(
+                "min_throttle_interval_seconds",
+                default=current_load.get(
+                    "min_throttle_interval_seconds", DEFAULT_MIN_THROTTLE_INTERVAL
                 ),
-                vol.Optional(
-                    "min_throttle_interval_seconds",
-                    default=current_load.get(
-                        "min_throttle_interval_seconds", DEFAULT_MIN_THROTTLE_INTERVAL
-                    ),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=1, mode=selector.NumberSelectorMode.BOX
-                    )
-                ),
-                vol.Optional(
-                    "can_turn_on_entity",
-                    default=can_turn_on,
-                ): selector.EntitySelector(
+            )
+        ] = selector.NumberSelector(
+            selector.NumberSelectorConfig(min=1, mode=selector.NumberSelectorMode.BOX)
+        )
+
+        if can_turn_on:
+            schema_fields[vol.Optional("can_turn_on_entity", default=can_turn_on)] = (
+                selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain=["binary_sensor", "input_boolean"]
                     )
-                ),
-                vol.Required("delete_load", default=False): selector.BooleanSelector(),
-            }
+                )
+            )
+        else:
+            schema_fields[vol.Optional("can_turn_on_entity")] = selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean"])
+            )
+
+        schema_fields[vol.Required("delete_load", default=False)] = (
+            selector.BooleanSelector()
         )
+
+        schema = vol.Schema(schema_fields)
         return self.async_show_form(
             step_id="edit_load",
             data_schema=schema,
