@@ -53,7 +53,8 @@ class State:
         self.enable_load_control: bool = False
         self.solar_generation_amps: float = 0.0
         self.controllable_loads: dict[str, ControllableLoadState] = {}
-        self.last_overload: datetime | None = None
+        self.overload_timestamp: datetime | None = None
+        self.safety_abort_timestamp: datetime | None = None
         self.last_recalculation: datetime | None = None
         self.available_amps_history: deque[tuple[datetime, float]] = deque(maxlen=100)
         self.solar_generation_initialised: bool = False
