@@ -607,44 +607,45 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
 
         # Determine if this load should be on
         # Check both available power and external constraints
-        should_be_on = (
-            available_amps >= config.min_controllable_load_amps and state.can_turn_on
-        )
-
-        # Log if external constraint is preventing turn on
-        if (
-            available_amps >= config.min_controllable_load_amps
-            and not state.can_turn_on
-        ):
-            _LOGGER.debug(
-                "Load %s has sufficient power but external constraint prevents turn on",
-                load_name,
-            )
+        should_be_on = available_amps >= config.min_controllable_load_amps
 
         # Make sure we have a stable minimum available power before turning on (important for solar)
-        min_unallocated_amps = STATE.get_minimum_unallocated_amps(
-            config.min_toggle_interval_seconds
-        )
         if (
             should_be_on
             and not state.is_on
             and not previous_plan.is_on
             and not STATE.allow_grid_import
         ):
+            min_unallocated_amps = STATE.get_minimum_unallocated_amps(
+                config.min_toggle_interval_seconds
+            )
             if min_unallocated_amps < config.min_controllable_load_amps:
+                should_be_on = False
                 _LOGGER.debug(
                     "Preventing load %s turn on due to insufficient minimum capacity of %gA over last %ds",
                     load_name,
                     min_unallocated_amps,
                     config.min_toggle_interval_seconds,
                 )
-                should_be_on = False
+
+        # Log if external constraint is preventing turn on
+        if should_be_on and not state.can_turn_on:
+            should_be_on = False
+            _LOGGER.debug(
+                "Load %s has sufficient power but external constraint prevents turn on",
+                load_name,
+            )
 
         if state.is_switch_rate_limited:
-            if should_be_on != previous_plan.is_on or state.is_on:
-                _LOGGER.debug(
-                    "Unable to toggle load %s due to switch rate limit", load_name
-                )
+            if should_be_on != (previous_plan.is_on or state.is_on):
+                if should_be_on:
+                    _LOGGER.debug(
+                        "Unable to turn load %s on due to switch rate limit", load_name
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Unable to turn load %s off due to switch rate limit", load_name
+                    )
             plan.is_on = previous_plan.is_on or state.is_on
         else:
             plan.is_on = should_be_on
