@@ -1,19 +1,19 @@
 ![ZeroGrid Logo](logo.svg)
+
 # ZeroGrid
 
 ZeroGrid is a Home Assistant integration that intelligently manages controllable loads to maximize use of available power from solar in order to minimise grid dependence. It can also be used with or without solar to limit grid import and prevent circuit overload.
-
 
 ## Features
 
 -   **Priority-based load management** - Loads are prioritized by their order in configuration, with the first load having the highest priority
 -   **Solar integration** - Automatically uses available solar power for controllable loads if configured
+-   **Configurable rate limiting** - Reduces wear on contactors from rapid switching
 -   **Throttleable loads** - Support for loads that can operate at variable power levels (e.g., EV chargers can be throttled between minimum and maximum amperage)
 -   **External constraints** - Optional `can_turn_on_entity` allows external conditions to control whether a load can be turned on (e.g., only try to charge EV when car is plugged in)
 -   **Soft start compensation** - Configurable delay period uses expected load instead of measured load to account for soft starts and measurement delays
 -   **Overload detection** - Immediately sheds loads if consumption exceeds safe limits for more than `recalculate_interval_seconds`, automatically recovers once sufficient load is shed
--   **Emergency abort** - Cuts all loads if critical sensors become unavailable, requires manual re-enabling of load-control
--   **Rate limiting** - Reduces wear on contactors from rapid switching
+-   **Emergency abort** - Cuts all loads if critical sensors become unavailable for more than 60s, requires manual re-enabling of load-control
 
 ## Disclaimer
 
@@ -21,8 +21,7 @@ ZeroGrid is a Home Assistant integration that intelligently manages controllable
 
 This software is provided "as is," without any warranty of any kind, express or implied. The authors and contributors are not liable for any damages or losses, including but not limited to property damage, personal injury, or financial loss, arising from the use or inability to use this software.
 
-Controlling high-power electrical systems is inherently dangerous. It is your responsibility to ensure that your system is installed and configured safely and in compliance with all local laws and regulations. 
-
+Controlling high-power electrical systems is inherently dangerous. It is your responsibility to ensure that your system is installed and configured safely and in compliance with all local laws and regulations.
 
 ## How It Works
 
@@ -63,7 +62,6 @@ The optional `can_turn_on_entity` allows you to prevent a load from being turned
     -   Only heat pool when home is occupied (`binary_sensor.home_occupied`)
     -   Only run heat pump during off-peak hours (`binary_sensor.off_peak_period`)
 
-
 ## Installation
 
 Install via HACS or manually copy the `custom_components/zerogrid` directory to your Home Assistant configuration directory.
@@ -76,16 +74,16 @@ ZeroGrid is configured through the Home Assistant UI using a config flow. After 
 
 The setup process is divided into several steps:
 
-- **Initial Setup**: Name your ZeroGrid instance and provide the primary monitoring sensors.
-- **Safety & Limits**: Define the maximum load for your system, grid import, and solar generation, along with safety margins.
-- **Load Configuration**: Specify how many controllable loads you want to manage, then configure each one with its specific entities and parameters.
+-   **Initial Setup**: Name your ZeroGrid instance and provide the primary monitoring sensors.
+-   **Safety & Limits**: Define the maximum load for your system, grid import, and solar generation, along with safety margins.
+-   **Load Configuration**: Specify how many controllable loads you want to manage, then configure each one with its specific entities and parameters.
 
 You can create multiple instances of ZeroGrid to manage different sets of loads or phases independently.
 
 ### Caveats & Gotchas
 
-- **Multi-Phase Systems**: To manage load across multiple phases, set up a separate instance of ZeroGrid for each phase you want to manage using the appropriate entities and constraints.
-- **Off-Grid & Export Limits**: To allocate power effectively, ZeroGrid needs to know the total available solar generation. This is typically measured by placing the solar array under a continuous load, which is most easily achieved by exporting surplus power to the grid. In off-grid systems or those with strict export limits, if there is no other consistent load, ZeroGrid cannot accurately gauge the available solar power. This can lead to suboptimal power allocation, so off-grid use is not recommended.
+-   **Multi-Phase Systems**: To manage load across multiple phases, set up a separate instance of ZeroGrid for each phase you want to manage using the appropriate entities and constraints.
+-   **Off-Grid & Export Limits**: To allocate power effectively, ZeroGrid needs to know the total available solar generation. This is typically measured by placing the solar array under a continuous load, which is most easily achieved by exporting surplus power to the grid. In off-grid systems or those with strict export limits, if there is no other consistent load, ZeroGrid cannot accurately gauge the available solar power. This can lead to suboptimal power allocation, so off-grid use is not recommended.
 
 ### Configuration Options Reference
 
@@ -128,10 +126,6 @@ Each controllable load has the following configuration:
 
 **Note:** Loads are prioritized in the order they appear in the configuration. The first load listed has the highest priority (priority 0), the second has priority 1, and so on.
 
----
-
-> **Migration Note:** If you previously configured ZeroGrid using YAML in `configuration.yaml`, please remove that configuration and set up the integration through the UI instead. All configuration is now managed through Home Assistant's integration interface.
-
 ## Entities
 
 ZeroGrid creates the following entities that indicate how the system is performing:
@@ -146,4 +140,3 @@ ZeroGrid creates the following entities that indicate how the system is performi
 | `binary_sensor.zerogrid_safety_abort` | Indicates if a safety abort has occurred because critical sensor data is unavailable.                                                            |
 | `switch.zerogrid_enable_load_control` | Master enable/disable for load control. When off, no loads will be automatically controlled. Cycling this also resets any throttling timers.     |
 | `switch.zerogrid_allow_grid_import`   | Enable/disable grid import. When off, only solar power can be used for controllable loads.                                                       |
-

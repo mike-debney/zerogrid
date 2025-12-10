@@ -43,8 +43,23 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     # Only register the service here - config entries handle the rest
     async def handle_recalculate_load_control(call) -> None:
         """Handle the recalculate_load_control service call."""
-        _LOGGER.info("Manual recalculation triggered via service call")
-        await recalculate_load_control(hass)
+        entry_id = call.data.get("entry_id")
+
+        if entry_id:
+            # Recalculate specific entry
+            if entry_id not in CONFIGS:
+                raise ServiceValidationError(
+                    f"Config entry {entry_id} not found",
+                    translation_domain=DOMAIN,
+                    translation_key="entry_not_found",
+                )
+            _LOGGER.info("Manual recalculation triggered for entry %s", entry_id)
+            await recalculate_load_control(hass, entry_id)
+        else:
+            # Recalculate all entries
+            _LOGGER.info("Manual recalculation triggered for all entries")
+            for entry_id in CONFIGS:
+                await recalculate_load_control(hass, entry_id)
 
     hass.services.async_register(
         DOMAIN,
@@ -123,7 +138,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "unavailable",
             ):
                 state.solar_generation_amps = float(new_state.state)
-                state.solar_generation_initialised = True
                 await recalculate_load_control(hass, entry.entry_id)
             else:
                 state.solar_generation_amps = 0.0
@@ -493,11 +507,9 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
 
     config = hass.data[DOMAIN][entry_id]["config"]
     state = hass.data[DOMAIN][entry_id]["state"]
-    if not state.house_consumption_initialised or (
-        config.allow_solar_consumption and not state.solar_generation_initialised
-    ):
+    if not state.house_consumption_initialised:
         _LOGGER.debug(
-            "Recalculation skipped - house consumption or solar generation not initialised for entry %s",
+            "Recalculation skipped - house consumption not initialised for entry %s",
             entry_id,
         )
         return
@@ -925,9 +937,7 @@ async def safety_abort(hass: HomeAssistant, entry_id: str, force: bool = False):
     plan = hass.data[DOMAIN][entry_id]["plan"]
 
     # Skip abort if state is not initialised yet
-    if not state.house_consumption_initialised or (
-        config.allow_solar_consumption and not state.solar_generation_initialised
-    ):
+    if not state.house_consumption_initialised:
         return
 
     # Skip abort if load control is disabled
