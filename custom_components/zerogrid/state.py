@@ -55,6 +55,7 @@ class State:
         self.controllable_loads: dict[str, ControllableLoadState] = {}
         self.overload_timestamp: datetime | None = None
         self.safety_abort_timestamp: datetime | None = None
+        self.safety_abort_active: bool = False
         self.last_recalculation: datetime | None = None
         self.available_amps_history: deque[tuple[datetime, float]] = deque(maxlen=100)
         self.house_consumption_initialised: bool = False

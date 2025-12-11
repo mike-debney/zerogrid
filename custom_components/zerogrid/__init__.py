@@ -95,13 +95,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up per-entry entity change listeners
     config = CONFIGS[entry.entry_id]
     state = STATES[entry.entry_id]
-    plan = PLANS[entry.entry_id]
     entity_ids: list[str] = [config.house_consumption_amps_entity]
+
     if (
         config.allow_solar_consumption
         and config.solar_generation_amps_entity is not None
     ):
         entity_ids.append(config.solar_generation_amps_entity)
+
     for load_config in config.controllable_loads.values():
         entity_ids.append(load_config.load_amps_entity)
         if load_config.switch_entity is not None:
@@ -125,13 +126,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ):
                 state.house_consumption_amps = float(new_state.state)
                 state.house_consumption_initialised = True
+                clear_safety_abort(hass, entry.entry_id)
                 await recalculate_load_control(hass, entry.entry_id)
             else:
-                _LOGGER.error(
-                    "House consumption entity is unavailable, cutting all load for safety"
-                )
                 await safety_abort(hass, entry.entry_id)
-                return
+
         elif entity_id == config.solar_generation_amps_entity:
             if new_state is not None and new_state.state not in (
                 "unknown",
@@ -141,6 +140,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await recalculate_load_control(hass, entry.entry_id)
             else:
                 state.solar_generation_amps = 0.0
+
         else:
             # Check if it's a controllable load entity
             for load_config in config.controllable_loads.values():
@@ -507,9 +507,17 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
 
     config = hass.data[DOMAIN][entry_id]["config"]
     state = hass.data[DOMAIN][entry_id]["state"]
+
     if not state.house_consumption_initialised:
         _LOGGER.debug(
             "Recalculation skipped - house consumption not initialised for entry %s",
+            entry_id,
+        )
+        return
+
+    if state.safety_abort_active:
+        _LOGGER.debug(
+            "Recalculation skipped - safety abort for entry %s",
             entry_id,
         )
         return
@@ -913,19 +921,22 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState, entry_id: str):
     _LOGGER.debug("Plan execution completed for %d loads", len(plan.controllable_loads))
 
 
-async def clear_safety_abort(hass: HomeAssistant, entry_id: str):
+def clear_safety_abort(hass: HomeAssistant, entry_id: str):
     """Clear safety abort state if system has recovered."""
 
     state = hass.data[DOMAIN][entry_id]["state"]
-    state.safety_abort_timestamp = None
-    if (
-        entry_id in hass.data.get(DOMAIN, {})
-        and "entities" in hass.data[DOMAIN][entry_id]
-        and "safety_abort_sensor" in hass.data[DOMAIN][entry_id]["entities"]
-    ):
-        hass.data[DOMAIN][entry_id]["entities"]["safety_abort_sensor"].update_state(
-            False
-        )
+    if state.safety_abort_active:
+        state.safety_abort_timestamp = None
+        state.safety_abort_active = False
+        if (
+            entry_id in hass.data.get(DOMAIN, {})
+            and "entities" in hass.data[DOMAIN][entry_id]
+            and "safety_abort_sensor" in hass.data[DOMAIN][entry_id]["entities"]
+        ):
+            hass.data[DOMAIN][entry_id]["entities"]["safety_abort_sensor"].update_state(
+                False
+            )
+        _LOGGER.error("Safety abort cleared for entry %s", entry_id)
 
 
 async def safety_abort(hass: HomeAssistant, entry_id: str, force: bool = False):
@@ -944,13 +955,19 @@ async def safety_abort(hass: HomeAssistant, entry_id: str, force: bool = False):
     if not state.enable_load_control and not force:
         return
 
+    # Skip abort if already in safety abort
+    if state.safety_abort_active:
+        return
+
     # Skip abort if safety abort has not been active for long enough
     now = datetime.now()
     if state.safety_abort_timestamp is None:
         state.safety_abort_timestamp = now
     if now < state.safety_abort_timestamp + timedelta(seconds=60) and not force:
         return
-    _LOGGER.error("Aborting load control, cutting all loads for entry %s", entry_id)
+    _LOGGER.error(
+        "Aborting load control for safety, cutting all loads for entry %s", entry_id
+    )
 
     # Update safety abort binary sensor
     if (
@@ -961,15 +978,7 @@ async def safety_abort(hass: HomeAssistant, entry_id: str, force: bool = False):
         hass.data[DOMAIN][entry_id]["entities"]["safety_abort_sensor"].update_state(
             True
         )
-
-    if (
-        entry_id in hass.data.get(DOMAIN, {})
-        and "entities" in hass.data[DOMAIN][entry_id]
-        and "enable_load_control" in hass.data[DOMAIN][entry_id]["entities"]
-    ):
-        hass.data[DOMAIN][entry_id]["entities"]["enable_load_control"].update_value(
-            False
-        )
+    state.safety_abort_active = True
 
     plan.available_amps = 0.0
     plan.used_amps = 0.0
