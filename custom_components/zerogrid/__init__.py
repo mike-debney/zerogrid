@@ -419,7 +419,7 @@ async def calculate_effective_available_power(
     )
 
     # Accumulate the total unallocated power (before subtracting loads) into history
-    state.accumulate_unallocated_amps(total_available_power_amps, max_window_seconds)
+    state.accumulate_available_amps(total_available_power_amps, max_window_seconds)
 
     # Subtract loads that are under load control, since we can manage those
     total_load_not_under_control = state.house_consumption_amps
@@ -607,28 +607,36 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
 
         will_consume_amps = 0.0
 
-        # Determine if this load should be on
-        # Check both available power and external constraints
+        # Determine if this load should be on based on available power
         should_be_on = available_amps >= config.min_controllable_load_amps
 
-        # Make sure we have a stable minimum available power before turning on (important for solar)
-        if (
-            should_be_on
-            and not state.is_on
-            and not previous_plan.is_on
-            and not STATE.allow_grid_import
-        ):
-            min_unallocated_amps = STATE.get_minimum_unallocated_amps(
-                config.min_toggle_interval_seconds
-            )
-            if min_unallocated_amps < config.min_controllable_load_amps:
-                should_be_on = False
-                _LOGGER.debug(
-                    "Preventing load %s turn on due to insufficient minimum capacity of %gA over last %ds",
-                    load_name,
-                    min_unallocated_amps,
-                    config.min_toggle_interval_seconds,
+        if not STATE.allow_grid_import:
+            # Make sure we have a stable minimum available power before turning on (important for solar)
+            if should_be_on and not state.is_on and not previous_plan.is_on:
+                min_available_amps = STATE.get_minimum_available_amps(
+                    config.solar_turn_on_window_seconds
                 )
+                if min_available_amps < config.min_controllable_load_amps:
+                    should_be_on = False
+                    _LOGGER.debug(
+                        "Preventing load %s turn on due to insufficient minimum capacity of %gA over last %ds",
+                        load_name,
+                        min_available_amps,
+                        config.solar_turn_on_window_seconds,
+                    )
+            # Prevent turning off loads early if available power is low for short periods
+            elif state.is_on and state.is_under_load_control and not should_be_on:
+                average_available_amps = STATE.get_average_available_amps(
+                    config.solar_turn_off_window_seconds
+                )
+                if average_available_amps > config.min_controllable_load_amps:
+                    should_be_on = True
+                    _LOGGER.debug(
+                        "Preventing load %s turn off due to average capacity of %gA over last %ds",
+                        load_name,
+                        average_available_amps,
+                        config.solar_turn_off_window_seconds,
+                    )
 
         # Log if external constraint is preventing turn on
         if should_be_on and not state.can_turn_on:
@@ -638,6 +646,7 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 load_name,
             )
 
+        # Prevent toggling if rate limited
         if state.is_switch_rate_limited:
             if should_be_on != (previous_plan.is_on or state.is_on):
                 if should_be_on:
@@ -871,13 +880,13 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState, entry_id: str):
                 )
             else:
                 throttle_amps_delta = abs(
-                    new_plan.throttle_amps - previous_plan.throttle_amps
+                    round(new_plan.throttle_amps) - round(previous_plan.throttle_amps)
                 )
-                if throttle_amps_delta > CONFIG.hysteresis_amps:
+                if throttle_amps_delta > 0:
                     _LOGGER.info(
                         "Throttling load %s to %gA",
                         config.throttle_amps_entity,
-                        new_plan.throttle_amps,
+                        round(new_plan.throttle_amps),
                     )
                     state.last_throttled = now
                     number_domain = parse_entity_domain(config.throttle_amps_entity)
@@ -963,7 +972,7 @@ async def safety_abort(hass: HomeAssistant, entry_id: str, force: bool = False):
     now = datetime.now()
     if state.safety_abort_timestamp is None:
         state.safety_abort_timestamp = now
-    if now < state.safety_abort_timestamp + timedelta(seconds=60) and not force:
+    if now < state.safety_abort_timestamp + timedelta(seconds=120) and not force:
         return
     _LOGGER.error(
         "Aborting load control for safety, cutting all loads for entry %s", entry_id

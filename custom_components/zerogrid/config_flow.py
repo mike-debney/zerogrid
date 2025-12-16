@@ -26,6 +26,8 @@ DEFAULT_RECALCULATE_INTERVAL = 30
 DEFAULT_LOAD_MEASUREMENT_DELAY = 120
 DEFAULT_MIN_TOGGLE_INTERVAL = 600
 DEFAULT_MIN_THROTTLE_INTERVAL = 10
+DEFAULT_SOLAR_TURN_ON_WINDOW = 600
+DEFAULT_SOLAR_TURN_OFF_WINDOW = 300
 
 
 def _filter_none_values(data: dict[str, Any]) -> dict[str, Any]:
@@ -241,6 +243,22 @@ class ZeroGridConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional("can_turn_on_entity"): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain=["binary_sensor", "input_boolean"]
+                    )
+                ),
+                vol.Optional(
+                    "solar_turn_on_window_seconds",
+                    default=DEFAULT_SOLAR_TURN_ON_WINDOW,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    "solar_turn_off_window_seconds",
+                    default=DEFAULT_SOLAR_TURN_OFF_WINDOW,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
             }
@@ -557,6 +575,22 @@ class ZeroGridOptionsFlow(OptionsFlow):
                         domain=["binary_sensor", "input_boolean"]
                     )
                 ),
+                vol.Optional(
+                    "solar_turn_on_window_seconds",
+                    default=DEFAULT_SOLAR_TURN_ON_WINDOW,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    "solar_turn_off_window_seconds",
+                    default=DEFAULT_SOLAR_TURN_OFF_WINDOW,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
             }
         )
         return self.async_show_form(step_id="add_load", data_schema=schema)
@@ -707,6 +741,28 @@ class ZeroGridOptionsFlow(OptionsFlow):
             schema_fields[vol.Optional("can_turn_on_entity")] = selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean"])
             )
+
+        schema_fields[
+            vol.Optional(
+                "solar_turn_on_window_seconds",
+                default=current_load.get(
+                    "solar_turn_on_window_seconds", DEFAULT_SOLAR_TURN_ON_WINDOW
+                ),
+            )
+        ] = selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, mode=selector.NumberSelectorMode.BOX)
+        )
+
+        schema_fields[
+            vol.Optional(
+                "solar_turn_off_window_seconds",
+                default=current_load.get(
+                    "solar_turn_off_window_seconds", DEFAULT_SOLAR_TURN_OFF_WINDOW
+                ),
+            )
+        ] = selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, mode=selector.NumberSelectorMode.BOX)
+        )
 
         schema_fields[vol.Required("delete_load", default=False)] = (
             selector.BooleanSelector()

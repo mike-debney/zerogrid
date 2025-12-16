@@ -10,6 +10,8 @@ class ControllableLoadConfig:
     min_controllable_load_amps: float = 0
     min_toggle_interval_seconds: int = 60
     min_throttle_interval_seconds: int = 10
+    solar_turn_on_window_seconds: int = 300
+    solar_turn_off_window_seconds: int = 300
     load_amps_entity: str
     switch_entity: str
     throttle_amps_entity: str | None = None

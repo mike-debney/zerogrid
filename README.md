@@ -11,9 +11,9 @@ ZeroGrid is a Home Assistant integration that intelligently manages controllable
 -   **Configurable rate limiting** - Reduces wear on contactors from rapid switching
 -   **Throttleable loads** - Support for loads that can operate at variable power levels (e.g., EV chargers can be throttled between minimum and maximum amperage)
 -   **External constraints** - Optional `can_turn_on_entity` allows external conditions to control whether a load can be turned on (e.g., only try to charge EV when car is plugged in)
--   **Soft start compensation** - Configurable delay period uses expected load instead of measured load to account for soft starts and measurement delays
+-   **Soft start compensation** - Configurable delay period uses expected load instead of measured load to account for soft starts, variable loads, and measurement delays
 -   **Overload detection** - Immediately sheds loads if consumption exceeds safe limits for more than `recalculate_interval_seconds`, automatically recovers once sufficient load is shed
--   **Emergency abort** - Cuts all loads if critical sensors become unavailable for more than 60s, requires manual re-enabling of load-control
+-   **Emergency abort** - Cuts all loads if house power consumption sensor become unavailable for more than 120s
 
 ## Disclaimer
 
@@ -123,6 +123,8 @@ Each controllable load has the following configuration:
 | `throttle_amps_entity` | No | - | Number entity to control throttle level (enables throttling) |
 | `min_throttle_interval_seconds` | No | 10 | Minimum time between throttle adjustments |
 | `can_turn_on_entity` | No | - | Binary sensor or input_boolean that must be "on" for the load to be turned on |
+| `solar_turn_on_window_seconds` | No | 600 | Time window to wait for sufficient solar surplus before turning on this load (only when grid import is disabled) |
+| `solar_turn_off_window_seconds` | No | 300 | Time window to wait before turning off this load when average solar surplus becomes insufficient (only when grid import is disabled) |
 
 **Note:** Loads are prioritized in the order they appear in the configuration. The first load listed has the highest priority (priority 0), the second has priority 1, and so on.
 

@@ -60,7 +60,7 @@ class State:
         self.available_amps_history: deque[tuple[datetime, float]] = deque(maxlen=100)
         self.house_consumption_initialised: bool = False
 
-    def accumulate_unallocated_amps(
+    def accumulate_available_amps(
         self,
         value: float,
         max_duration_seconds: float,
@@ -87,7 +87,7 @@ class State:
         ):
             self.available_amps_history.popleft()
 
-    def get_minimum_unallocated_amps(
+    def get_minimum_available_amps(
         self,
         lookback_seconds: float,
     ) -> float:
@@ -118,3 +118,35 @@ class State:
             min_value = 0
 
         return min_value
+
+    def get_average_available_amps(
+        self,
+        lookback_seconds: float,
+    ) -> float:
+        """Get the average available amps from the buffer within a time window.
+
+        Args:
+            current_time: The current time to measure lookback from
+            lookback_seconds: How many seconds back to look for the average
+
+        Returns:
+            The average value found within the time window, or the most recent value
+            if no values exist in the window, or None if the buffer is empty.
+        """
+        cutoff_time = datetime.now() - timedelta(seconds=lookback_seconds)
+        total_value = 0.0
+        count = 0
+
+        for timestamp, value in self.available_amps_history:
+            if timestamp >= cutoff_time:
+                total_value += value
+                count += 1
+
+        # If no values found in window but buffer has data, return most recent value
+        if count == 0 and self.available_amps_history:
+            total_value = self.available_amps_history[-1][1]
+            count = 1
+        if count == 0:
+            return 0
+
+        return total_value / count
