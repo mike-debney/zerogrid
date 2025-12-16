@@ -261,7 +261,6 @@ def parse_config(domain_config):
     )
 
     CONFIG.safety_margin_amps = domain_config.get("safety_margin_amps", 2.0)
-    CONFIG.hysteresis_amps = domain_config.get("hysteresis_amps", 1.0)
     CONFIG.recalculate_interval_seconds = domain_config.get(
         "recalculate_interval_seconds", 10
     )

@@ -97,7 +97,6 @@ Below is a reference of all available configuration options. These are entered t
 | `max_grid_import_amps`           | Yes      | -       | Maximum power draw allowed from the grid                                                                                         |
 | `max_solar_generation_amps`      | Yes      | -       | Maximum solar generation capacity in amps                                                                                        |
 | `safety_margin_amps`             | No       | 2.0     | Safety buffer above maximum load before triggering overload protection                                                           |
-| `hysteresis_amps`                | No       | 1.0     | Prevents rapid switching/oscillation                                                                                             |
 | `recalculate_interval_seconds`   | No       | 30      | Periodic recalculation interval (in addition to event-driven based on house consumption readings)                                |
 | `load_measurement_delay_seconds` | No       | 120     | Time in seconds to use expected load instead of measured load after turning on (accounts for soft starts and measurement delays) |
 | `enable_automatic_recalculation` | No       | true    | Enable periodic recalculation of loads. If disabled, recalculation only occurs when house consumption changes.                   |

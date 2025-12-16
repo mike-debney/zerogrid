@@ -21,7 +21,6 @@ DEFAULT_MAX_TOTAL_LOAD_AMPS = 63
 DEFAULT_MAX_GRID_IMPORT_AMPS = 63
 DEFAULT_MAX_SOLAR_GENERATION_AMPS = 48
 DEFAULT_SAFETY_MARGIN_AMPS = 2.0
-DEFAULT_HYSTERESIS_AMPS = 1.0
 DEFAULT_RECALCULATE_INTERVAL = 30
 DEFAULT_LOAD_MEASUREMENT_DELAY = 120
 DEFAULT_MIN_TOGGLE_INTERVAL = 600
@@ -141,13 +140,6 @@ class ZeroGridConfigFlow(ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Required(
                     "safety_margin_amps", default=DEFAULT_SAFETY_MARGIN_AMPS
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0, mode=selector.NumberSelectorMode.BOX, step=0.1
-                    )
-                ),
-                vol.Required(
-                    "hysteresis_amps", default=DEFAULT_HYSTERESIS_AMPS
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0, mode=selector.NumberSelectorMode.BOX, step=0.1
@@ -412,16 +404,6 @@ class ZeroGridOptionsFlow(OptionsFlow):
                     "safety_margin_amps",
                     default=current_config.get(
                         "safety_margin_amps", DEFAULT_SAFETY_MARGIN_AMPS
-                    ),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0, mode=selector.NumberSelectorMode.BOX, step=0.1
-                    )
-                ),
-                vol.Required(
-                    "hysteresis_amps",
-                    default=current_config.get(
-                        "hysteresis_amps", DEFAULT_HYSTERESIS_AMPS
                     ),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(

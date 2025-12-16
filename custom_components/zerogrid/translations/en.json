@@ -26,15 +26,13 @@
                     "max_total_load_amps": "Maximum total load (amps)",
                     "max_grid_import_amps": "Maximum grid import (amps)",
                     "max_solar_generation_amps": "Maximum solar generation (amps)",
-                    "safety_margin_amps": "Safety margin (amps)",
-                    "hysteresis_amps": "Hysteresis (amps)"
+                    "safety_margin_amps": "Safety margin (amps)"
                 },
                 "data_description": {
                     "max_total_load_amps": "Maximum total load that your electrical system can handle. This is typically determined by your main circuit breaker rating.",
                     "max_grid_import_amps": "Maximum amount of load allowed to be drawn from the grid. Set this to zero to prevent any grid import, or to a specific value to limit grid usage while allowing some backup power.",
                     "max_solar_generation_amps": "Maximum solar generation capacity in amps. This should typically match your solar inverter's maximum output.",
-                    "safety_margin_amps": "Safety buffer above the maximum load threshold. When total consumption exceeds max_total_load_amps + safety_margin_amps for longer than the recalculate interval, the system will trigger overload protection by immediately shedding controllable loads in reverse priority.",
-                    "hysteresis_amps": "Hysteresis value in amps to reduce oscillations and improve stability."
+                    "safety_margin_amps": "Safety buffer above the maximum load threshold. When total consumption exceeds max_total_load_amps + safety_margin_amps for longer than the recalculate interval, the system will trigger overload protection by immediately shedding controllable loads in reverse priority."
                 }
             },
             "loads": {
@@ -119,15 +117,13 @@
                     "max_total_load_amps": "Maximum total load (amps)",
                     "max_grid_import_amps": "Maximum grid import (amps)",
                     "max_solar_generation_amps": "Maximum solar generation (amps)",
-                    "safety_margin_amps": "Safety margin (amps)",
-                    "hysteresis_amps": "Hysteresis (amps)"
+                    "safety_margin_amps": "Safety margin (amps)"
                 },
                 "data_description": {
                     "max_total_load_amps": "Maximum total load that your electrical system can handle. This is typically determined by your main circuit breaker rating.",
                     "max_grid_import_amps": "Maximum amount of load allowed to be drawn from the grid. Set this to zero to prevent any grid import, or to a specific value to limit grid usage while allowing some backup power.",
                     "max_solar_generation_amps": "Maximum solar generation capacity in amps. This should typically match your solar inverter's maximum output.",
-                    "safety_margin_amps": "Safety buffer above the maximum load threshold. When total consumption exceeds max_total_load_amps + safety_margin_amps for longer than the recalculate interval, the system will trigger overload protection by immediately shedding controllable loads in reverse priority.",
-                    "hysteresis_amps": "Hysteresis value in amps to reduce oscillations and improve stability."
+                    "safety_margin_amps": "Safety buffer above the maximum load threshold. When total consumption exceeds max_total_load_amps + safety_margin_amps for longer than the recalculate interval, the system will trigger overload protection by immediately shedding controllable loads in reverse priority."
                 }
             },
             "manage_loads": {
