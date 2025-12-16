@@ -704,7 +704,7 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
             plan = new_plan.controllable_loads[load_name]
 
             # Skip non-throttleable loads and loads that are off
-            if not config.can_throttle or not plan.is_on:
+            if not config.can_throttle or not plan.is_on or not state.is_on:
                 continue
 
             if state.is_throttle_rate_limited:
