@@ -209,6 +209,14 @@ class ZeroGridConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required("load_amps_entity"): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["sensor", "input_number"])
                 ),
+                vol.Optional(
+                    "load_measurement_delay_seconds",
+                    default=DEFAULT_LOAD_MEASUREMENT_DELAY,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
                 vol.Required("switch_entity"): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain=["switch", "input_boolean", "climate"]
@@ -541,6 +549,14 @@ class ZeroGridOptionsFlow(OptionsFlow):
                 vol.Required("load_amps_entity"): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["sensor", "input_number"])
                 ),
+                vol.Optional(
+                    "load_measurement_delay_seconds",
+                    default=DEFAULT_LOAD_MEASUREMENT_DELAY,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
                 vol.Optional("throttle_amps_entity"): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain=["number", "input_number"])
                 ),
@@ -740,6 +756,17 @@ class ZeroGridOptionsFlow(OptionsFlow):
                 "solar_turn_off_window_seconds",
                 default=current_load.get(
                     "solar_turn_off_window_seconds", DEFAULT_SOLAR_TURN_OFF_WINDOW
+                ),
+            )
+        ] = selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, mode=selector.NumberSelectorMode.BOX)
+        )
+
+        schema_fields[
+            vol.Optional(
+                "load_measurement_delay_seconds",
+                default=current_load.get(
+                    "load_measurement_delay_seconds", DEFAULT_LOAD_MEASUREMENT_DELAY
                 ),
             )
         ] = selector.NumberSelector(

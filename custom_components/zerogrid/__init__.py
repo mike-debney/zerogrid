@@ -296,6 +296,9 @@ def parse_config(domain_config):
         control_config.min_throttle_interval_seconds = control.get(
             "min_throttle_interval_seconds", None
         )
+        control_config.load_measurement_delay_seconds = control.get(
+            "load_measurement_delay_seconds", 120
+        )
         control_config.load_amps_entity = control.get("load_amps_entity")
         control_config.switch_entity = control.get("switch_entity")
         control_config.throttle_amps_entity = control.get("throttle_amps_entity", None)
@@ -431,8 +434,9 @@ async def calculate_effective_available_power(
             # Determine if we should use expected load instead of measured load
             # to account for soft starts and measurement delays
             if load_state.on_since is not None and load_plan is not None:
+                load_config = config.controllable_loads[load_name]
                 time_since_on = (now - load_state.on_since).total_seconds()
-                if time_since_on < CONFIG.load_measurement_delay_seconds:
+                if time_since_on < load_config.load_measurement_delay_seconds:
                     current_load = load_plan.expected_load_amps
 
             total_load_not_under_control -= current_load
@@ -684,7 +688,7 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
             plan.is_on
             and state.on_since is not None
             and state.on_since
-            + timedelta(seconds=CONFIG.load_measurement_delay_seconds)
+            + timedelta(seconds=config.load_measurement_delay_seconds)
             < now
         ):
             available_amps += will_consume_amps  # Free up the allocation
@@ -872,14 +876,25 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState, entry_id: str):
             and state.is_under_load_control
         ):
             # Check if throttle entity exists
-            if hass.states.get(config.throttle_amps_entity) is None:
+            throttle_state = hass.states.get(config.throttle_amps_entity)
+            if throttle_state is None:
                 _LOGGER.error(
                     "Throttle entity %s does not exist, skipping throttling",
                     config.throttle_amps_entity,
                 )
             else:
+                # Read current value from the entity state
+                try:
+                    current_throttle_amps = float(throttle_state.state)
+                except (ValueError, TypeError):
+                    _LOGGER.warning(
+                        "Unable to read current throttle value for %s, using previous plan value",
+                        config.throttle_amps_entity,
+                    )
+                    current_throttle_amps = previous_plan.throttle_amps
+
                 throttle_amps_delta = abs(
-                    round(new_plan.throttle_amps) - round(previous_plan.throttle_amps)
+                    round(new_plan.throttle_amps) - round(current_throttle_amps)
                 )
                 if throttle_amps_delta > 0:
                     _LOGGER.info(

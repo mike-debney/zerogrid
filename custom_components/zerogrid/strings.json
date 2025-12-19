@@ -56,7 +56,8 @@
                     "throttle_amps_entity": "Throttle control entity (optional)",
                     "can_turn_on_entity": "Can turn on constraint entity (optional)",
                     "solar_turn_on_window_seconds": "Solar turn on window (seconds)",
-                    "solar_turn_off_window_seconds": "Solar turn off window (seconds)"
+                    "solar_turn_off_window_seconds": "Solar turn off window (seconds)",
+                    "load_measurement_delay_seconds": "Load measurement delay (seconds)"
                 },
                 "data_description": {
                     "name": "Unique name for the load",
@@ -69,7 +70,8 @@
                     "throttle_amps_entity": "Number entity to control throttle level (leave blank to disable throttling)",
                     "can_turn_on_entity": "Optional binary sensor or input_boolean that must be 'on' for the load to be turned on by load management",
                     "solar_turn_on_window_seconds": "Time window in seconds to wait for sufficient solar surplus before turning on this load. The load will only turn on if there has been enough solar surplus for this duration.",
-                    "solar_turn_off_window_seconds": "Time window in seconds to wait before turning off this load when average solar surplus becomes insufficient. This mitigates frequent on/off cycling due to temporary cloud cover."
+                    "solar_turn_off_window_seconds": "Time window in seconds to wait before turning off this load when average solar surplus becomes insufficient. This mitigates frequent on/off cycling due to temporary cloud cover.",
+                    "load_measurement_delay_seconds": "Time delay after turning on this load before using its actual measured consumption. During this period, the expected load value is used instead of the measured load to account for soft-starts, variable loads, and measurement delays."
                 }
             }
         },
@@ -147,7 +149,8 @@
                     "min_throttle_interval_seconds": "[%key:component::zerogrid::config::step::load_config::data::min_throttle_interval_seconds%]",
                     "can_turn_on_entity": "[%key:component::zerogrid::config::step::load_config::data::can_turn_on_entity%]",
                     "solar_turn_on_window_seconds": "[%key:component::zerogrid::config::step::load_config::data::solar_turn_on_window_seconds%]",
-                    "solar_turn_off_window_seconds": "[%key:component::zerogrid::config::step::load_config::data::solar_turn_off_window_seconds%]"
+                    "solar_turn_off_window_seconds": "[%key:component::zerogrid::config::step::load_config::data::solar_turn_off_window_seconds%]",
+                    "load_measurement_delay_seconds": "[%key:component::zerogrid::config::step::load_config::data::load_measurement_delay_seconds%]"
                 },
                 "data_description": {
                     "name": "[%key:component::zerogrid::config::step::load_config::data_description::name%]",
@@ -160,7 +163,8 @@
                     "min_throttle_interval_seconds": "[%key:component::zerogrid::config::step::load_config::data_description::min_throttle_interval_seconds%]",
                     "can_turn_on_entity": "[%key:component::zerogrid::config::step::load_config::data_description::can_turn_on_entity%]",
                     "solar_turn_on_window_seconds": "[%key:component::zerogrid::config::step::load_config::data_description::solar_turn_on_window_seconds%]",
-                    "solar_turn_off_window_seconds": "[%key:component::zerogrid::config::step::load_config::data_description::solar_turn_off_window_seconds%]"
+                    "solar_turn_off_window_seconds": "[%key:component::zerogrid::config::step::load_config::data_description::solar_turn_off_window_seconds%]",
+                    "load_measurement_delay_seconds": "[%key:component::zerogrid::config::step::load_config::data_description::load_measurement_delay_seconds%]"
                 }
             },
             "select_load_to_edit": {
@@ -183,6 +187,7 @@
                     "can_turn_on_entity": "[%key:component::zerogrid::config::step::load_config::data::can_turn_on_entity%]",
                     "solar_turn_on_window_seconds": "[%key:component::zerogrid::config::step::load_config::data::solar_turn_on_window_seconds%]",
                     "solar_turn_off_window_seconds": "[%key:component::zerogrid::config::step::load_config::data::solar_turn_off_window_seconds%]",
+                    "load_measurement_delay_seconds": "[%key:component::zerogrid::config::step::load_config::data::load_measurement_delay_seconds%]",
                     "delete_load": "Delete this load"
                 },
                 "data_description": {
@@ -197,6 +202,7 @@
                     "can_turn_on_entity": "[%key:component::zerogrid::config::step::load_config::data_description::can_turn_on_entity%]",
                     "solar_turn_on_window_seconds": "[%key:component::zerogrid::config::step::load_config::data_description::solar_turn_on_window_seconds%]",
                     "solar_turn_off_window_seconds": "[%key:component::zerogrid::config::step::load_config::data_description::solar_turn_off_window_seconds%]",
+                    "load_measurement_delay_seconds": "[%key:component::zerogrid::config::step::load_config::data_description::load_measurement_delay_seconds%]",
                     "delete_load": "Check this box to delete this load from the configuration"
                 }
             },
