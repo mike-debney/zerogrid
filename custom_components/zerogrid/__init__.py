@@ -698,7 +698,7 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                                 config.throttle_amps_entity,
                             )
 
-            elif using_measured_current:
+            elif using_measured_current and not config.can_throttle:
                 will_consume_amps = state.current_load_amps  # Track actual consumption
             else:
                 # Allocate minimum load, regardless of throttling
