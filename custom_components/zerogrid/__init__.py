@@ -718,7 +718,25 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 )
                 continue
 
+            # For loads past measurement delay, their expected_load_amps contains measured
+            # consumption, not allocated power. Read current throttle from entity state instead.
             previously_allocated_amps = plan.expected_load_amps
+            if (
+                state.on_since is not None
+                and state.on_since
+                + timedelta(seconds=config.load_measurement_delay_seconds)
+                < now
+            ):
+                # Read current throttle value from entity state
+                throttle_state = hass.states.get(config.throttle_amps_entity)
+                if throttle_state is not None:
+                    try:
+                        previously_allocated_amps = float(throttle_state.state)
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Unable to read throttle value for %s",
+                            config.throttle_amps_entity,
+                        )
 
             will_consume_amps = 0.0
 
