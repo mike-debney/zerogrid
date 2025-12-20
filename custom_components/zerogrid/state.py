@@ -12,6 +12,7 @@ class ControllableLoadPlanState:
         self.is_on: bool = False
         self.expected_load_amps: float = 0.0
         self.throttle_amps: float = 0.0
+        self.using_measured_current: bool = False
 
 
 class PlanState:
