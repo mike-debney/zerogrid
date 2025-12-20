@@ -673,6 +673,20 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
             if config.can_throttle and state.is_throttle_rate_limited:
                 # If we are unable to throttle due to rate limiting, pre-allocate previous throttle
                 will_consume_amps = plan.throttle_amps = previous_plan.throttle_amps
+
+                # Read current throttle value from entity state (not from previous plan)
+                throttle_state = hass.states.get(config.throttle_amps_entity)
+                if throttle_state is not None:
+                    try:
+                        will_consume_amps = plan.throttle_amps = float(
+                            throttle_state.state
+                        )
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Unable to read throttle value for %s",
+                            config.throttle_amps_entity,
+                        )
+
             else:
                 # Allocate minimum load, regardless of throttling
                 will_consume_amps = plan.throttle_amps = (
@@ -718,31 +732,13 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 )
                 continue
 
-            # For loads past measurement delay, their expected_load_amps contains measured
-            # consumption, not allocated power. Read current throttle from entity state instead.
-            previously_allocated_amps = plan.expected_load_amps
-            if (
-                state.on_since is not None
-                and state.on_since
-                + timedelta(seconds=config.load_measurement_delay_seconds)
-                < now
-            ):
-                # Read current throttle value from entity state
-                throttle_state = hass.states.get(config.throttle_amps_entity)
-                if throttle_state is not None:
-                    try:
-                        previously_allocated_amps = float(throttle_state.state)
-                    except (ValueError, TypeError):
-                        _LOGGER.warning(
-                            "Unable to read throttle value for %s",
-                            config.throttle_amps_entity,
-                        )
+            throttle_state_amps = plan.expected_load_amps
 
             will_consume_amps = 0.0
 
             # Give the load as much power as we can, accounting for what was previously allocated
             will_consume_amps = min(
-                available_amps + previously_allocated_amps,
+                available_amps + throttle_state_amps,
                 config.max_controllable_load_amps,
             )
             will_consume_amps = max(
@@ -750,7 +746,7 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
             )
             plan.throttle_amps = will_consume_amps
 
-            available_amps += previously_allocated_amps - will_consume_amps
+            available_amps += throttle_state_amps - will_consume_amps
             plan.expected_load_amps = will_consume_amps
             _LOGGER.debug(
                 "Planning to throttle load %s to %gA", load_name, will_consume_amps
