@@ -465,7 +465,7 @@ async def calculate_effective_available_power(
         and "available_load_sensor" in hass.data[DOMAIN][entry_id]["entities"]
     ):
         hass.data[DOMAIN][entry_id]["entities"]["available_load_sensor"].update_value(
-            total_available_amps
+            max(0, total_available_amps)
         )
     if (
         entry_id in hass.data.get(DOMAIN, {})
