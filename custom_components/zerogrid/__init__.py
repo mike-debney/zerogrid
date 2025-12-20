@@ -411,18 +411,6 @@ async def calculate_effective_available_power(
         total_available_power_amps, config.max_total_load_amps
     )
 
-    # Determine max window duration based on longest min_toggle_interval
-    max_window_seconds = max(
-        (
-            lconfig.min_toggle_interval_seconds
-            for lconfig in config.controllable_loads.values()
-        ),
-        default=60,  # Default to 60 seconds if no controllable loads configured
-    )
-
-    # Accumulate the total unallocated power (before subtracting loads) into history
-    state.accumulate_available_amps(total_available_power_amps, max_window_seconds)
-
     # Subtract loads that are under load control, since we can manage those
     total_load_not_under_control = state.house_consumption_amps
     for load_name in state.controllable_loads:
@@ -450,6 +438,19 @@ async def calculate_effective_available_power(
     total_available_amps = total_available_power_amps - max(
         total_load_not_under_control, 0
     )
+
+    # Determine max window duration based on longest min_toggle_interval
+    max_window_seconds = max(
+        (
+            lconfig.min_toggle_interval_seconds
+            for lconfig in config.controllable_loads.values()
+        ),
+        default=60,  # Default to 60 seconds if no controllable loads configured
+    )
+
+    # Accumulate the available power for load control into history
+    # This is the power available AFTER accounting for uncontrolled loads
+    state.accumulate_available_amps(total_available_amps, max_window_seconds)
 
     _LOGGER.debug(
         "Total available power: %gA, uncontrolled load: %gA, available for load control: %gA",
@@ -675,17 +676,18 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 will_consume_amps = plan.throttle_amps = previous_plan.throttle_amps
 
                 # Read current throttle value from entity state (not from previous plan)
-                throttle_state = hass.states.get(config.throttle_amps_entity)
-                if throttle_state is not None:
-                    try:
-                        will_consume_amps = plan.throttle_amps = float(
-                            throttle_state.state
-                        )
-                    except (ValueError, TypeError):
-                        _LOGGER.warning(
-                            "Unable to read throttle value for %s",
-                            config.throttle_amps_entity,
-                        )
+                if config.throttle_amps_entity:
+                    throttle_state = hass.states.get(config.throttle_amps_entity)
+                    if throttle_state is not None:
+                        try:
+                            will_consume_amps = plan.throttle_amps = float(
+                                throttle_state.state
+                            )
+                        except (ValueError, TypeError):
+                            _LOGGER.warning(
+                                "Unable to read throttle value for %s",
+                                config.throttle_amps_entity,
+                            )
 
             else:
                 # Allocate minimum load, regardless of throttling
