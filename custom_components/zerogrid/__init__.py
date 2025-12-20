@@ -432,13 +432,7 @@ async def calculate_effective_available_power(
                 time_since_on = (now - load_state.on_since).total_seconds()
                 if time_since_on < load_config.load_measurement_delay_seconds:
                     current_load = load_plan.expected_load_amps
-
             total_load_not_under_control -= current_load
-            _LOGGER.debug(
-                "Load %s drawing %gA",
-                load_name,
-                current_load,
-            )
 
     # Now calculate total available for load control by subtracting non-controlled loads
     total_available_amps = total_available_power_amps - max(
@@ -676,12 +670,10 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 else:
                     _LOGGER.debug("Planning to turn load %s off", load_name)
 
-        # For loads that have been on long enough, use measured current instead of allocation
-        # These loads are already subtracted in calculate_effective_available_power,
-        # so we add back the allocation and don't subtract the measured value
+        # Determine if we should use measured current for this load
+        # (load has been on long enough that we trust the measured value)
         using_measured_current = (
-            state.is_on
-            and state.on_since is not None
+            state.on_since is not None
             and state.on_since
             + timedelta(seconds=config.load_measurement_delay_seconds)
             < now
@@ -881,6 +873,7 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState, entry_id: str):
                     blocking=True,  # Wait for completion to ensure success
                 )
                 state.is_under_load_control = True
+                state.on_since = now  # Track when load was turned on
             except (ValueError, KeyError, RuntimeError, ServiceValidationError) as err:
                 _LOGGER.error("Failed to turn on %s: %s", config.switch_entity, err)
 
@@ -897,6 +890,7 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState, entry_id: str):
                     blocking=True,  # Wait for completion to ensure success
                 )
                 state.is_under_load_control = False
+                state.on_since = None  # Clear on_since when turned off
             except (ValueError, KeyError, RuntimeError, ServiceValidationError) as err:
                 _LOGGER.error("Failed to turn off %s: %s", config.switch_entity, err)
 
