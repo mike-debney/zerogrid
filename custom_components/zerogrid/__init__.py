@@ -299,6 +299,12 @@ def parse_config(domain_config):
         control_config.load_measurement_delay_seconds = control.get(
             "load_measurement_delay_seconds", 120
         )
+        control_config.solar_turn_on_window_seconds = control.get(
+            "solar_turn_on_window_seconds", 300
+        )
+        control_config.solar_turn_off_window_seconds = control.get(
+            "solar_turn_off_window_seconds", 300
+        )
         control_config.load_amps_entity = control.get("load_amps_entity")
         control_config.switch_entity = control.get("switch_entity")
         control_config.throttle_amps_entity = control.get("throttle_amps_entity", None)
@@ -670,6 +676,17 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 else:
                     _LOGGER.debug("Planning to turn load %s off", load_name)
 
+        # For loads that have been on long enough, use measured current instead of allocation
+        # These loads are already subtracted in calculate_effective_available_power,
+        # so we add back the allocation and don't subtract the measured value
+        using_measured_current = (
+            plan.is_on
+            and state.on_since is not None
+            and state.on_since
+            + timedelta(seconds=config.load_measurement_delay_seconds)
+            < now
+        )
+
         if plan.is_on:
             if config.can_throttle and state.is_throttle_rate_limited:
                 # If we are unable to throttle due to rate limiting, pre-allocate previous throttle
@@ -689,6 +706,8 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                                 config.throttle_amps_entity,
                             )
 
+            elif using_measured_current:
+                will_consume_amps = state.current_load_amps  # Track actual consumption
             else:
                 # Allocate minimum load, regardless of throttling
                 will_consume_amps = plan.throttle_amps = (
@@ -697,23 +716,7 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
         else:
             will_consume_amps = 0.0
 
-        # For loads that have been on long enough, use measured current instead of allocation
-        # These loads are already subtracted in calculate_effective_available_power,
-        # so we add back the allocation and don't subtract the measured value
-        using_measured_current = False
-        if (
-            plan.is_on
-            and state.on_since is not None
-            and state.on_since
-            + timedelta(seconds=config.load_measurement_delay_seconds)
-            < now
-        ):
-            available_amps += will_consume_amps  # Free up the allocation
-            will_consume_amps = state.current_load_amps  # Track actual consumption
-            using_measured_current = True
-        else:
-            available_amps -= will_consume_amps  # Reserve power for this load
-
+        available_amps -= will_consume_amps  # Allocate power for this load
         plan.expected_load_amps = will_consume_amps
         plan.using_measured_current = using_measured_current
 
@@ -737,32 +740,19 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 )
                 continue
 
-            will_consume_amps = 0.0
-
-            # Determine currently allocated/consumed power
-            # For measured loads: use measured current (what they're actually drawing)
-            # For allocated loads: use throttle setting (what we reserved for them)
-            if plan.using_measured_current:
-                allocated_amps = plan.expected_load_amps  # Measured current
-            else:
-                allocated_amps = plan.throttle_amps  # Allocated power
+            # First, give back any power we had previously allocated
+            available_amps += plan.expected_load_amps
 
             # Give the load as much power as we can, accounting for what's currently allocated
             will_consume_amps = min(
-                available_amps + allocated_amps,
+                available_amps,
                 config.max_controllable_load_amps,
             )
             will_consume_amps = max(
                 math.floor(will_consume_amps), config.min_controllable_load_amps
             )
-            plan.throttle_amps = will_consume_amps
-
-            available_amps += allocated_amps - will_consume_amps
-
-            # Only update expected_load_amps for loads using allocated power
-            # Loads using measured current keep their measured value
-            if not plan.using_measured_current:
-                plan.expected_load_amps = will_consume_amps
+            plan.throttle_amps = plan.expected_load_amps = will_consume_amps
+            available_amps -= will_consume_amps
 
             _LOGGER.debug(
                 "Planning to throttle load %s to %gA", load_name, will_consume_amps
