@@ -680,7 +680,7 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
         # These loads are already subtracted in calculate_effective_available_power,
         # so we add back the allocation and don't subtract the measured value
         using_measured_current = (
-            plan.is_on
+            state.is_on
             and state.on_since is not None
             and state.on_since
             + timedelta(seconds=config.load_measurement_delay_seconds)
@@ -820,10 +820,21 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
         )
 
     _LOGGER.debug(
-        "Planning complete: available=%gA, used=%gA",
+        "Planning complete: available: %gA, allocated: %gA",
         new_plan.available_amps,
         new_plan.used_amps,
     )
+    for load_name in prioritised_loads:
+        plan = new_plan.controllable_loads[load_name]
+        state = STATE.controllable_loads[load_name]
+        if plan.is_on:
+            _LOGGER.debug(
+                "Allocated %gA to load %s (measured: %s, measured current: %gA)",
+                plan.expected_load_amps,
+                load_name,
+                "yes" if plan.using_measured_current else "no",
+                state.current_load_amps,
+            )
 
     await execute_plan(hass, new_plan, entry_id)
 
