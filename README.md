@@ -11,7 +11,6 @@ ZeroGrid is a Home Assistant integration that intelligently manages controllable
 -   **Configurable rate limiting** - Reduces wear on contactors from rapid switching
 -   **Throttleable loads** - Support for loads that can operate at variable power levels (e.g., EV chargers can be throttled between minimum and maximum amperage)
 -   **External constraints** - Optional `can_turn_on_entity` allows external conditions to control whether a load can be turned on (e.g., only try to charge EV when car is plugged in)
--   **Soft start compensation** - Configurable delay period uses expected load instead of measured load to account for soft starts, variable loads, and measurement delays
 -   **Overload detection** - Immediately sheds loads if consumption exceeds safe limits for more than `recalculate_interval_seconds`, automatically recovers once sufficient load is shed
 -   **Emergency abort** - Cuts all loads if house power consumption sensor become unavailable for more than 120s
 
@@ -91,15 +90,14 @@ Below is a reference of all available configuration options. These are entered t
 
 #### System Settings
 
-| Option                           | Required | Default | Description                                                                                                                      |
-| -------------------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `max_total_load_amps`            | Yes      | -       | Maximum total load your electrical system can handle                                                                             |
-| `max_grid_import_amps`           | Yes      | -       | Maximum power draw allowed from the grid                                                                                         |
-| `max_solar_generation_amps`      | Yes      | -       | Maximum solar generation capacity in amps                                                                                        |
-| `safety_margin_amps`             | No       | 2.0     | Safety buffer above maximum load before triggering overload protection                                                           |
-| `recalculate_interval_seconds`   | No       | 30      | Periodic recalculation interval (in addition to event-driven based on house consumption readings)                                |
-| `load_measurement_delay_seconds` | No       | 120     | Time in seconds to use expected load instead of measured load after turning on (accounts for soft starts and measurement delays) |
-| `enable_automatic_recalculation` | No       | true    | Enable periodic recalculation of loads. If disabled, recalculation only occurs when house consumption changes.                   |
+| Option                           | Required | Default | Description                                                                                                                         |
+| -------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `max_total_load_amps`            | Yes      | -       | Maximum total load your electrical system can handle                                                                                |
+| `max_grid_import_amps`           | Yes      | -       | Maximum power draw allowed from the grid                                                                                            |
+| `max_solar_generation_amps`      | Yes      | -       | Maximum solar generation capacity in amps                                                                                           |
+| `safety_margin_amps`             | No       | 2.0     | Safety buffer above maximum load before triggering overload protection                                                              |
+| `recalculate_interval_seconds`   | No       | 30      | Periodic recalculation interval (in addition to event-driven based on house consumption readings)                                   |
+| `enable_automatic_recalculation` | No       | true    | Enable periodic recalculation of loads. If disabled, recalculation only occurs when house consumption changes.                      |
 
 #### Monitoring Entities
 
@@ -117,6 +115,7 @@ Each controllable load has the following configuration:
 | `max_controllable_load_amps` | Yes | - | Maximum power this load can consume |
 | `min_controllable_load_amps` | Yes | - | Minimum power needed (same as max for non-throttleable loads) |
 | `load_amps_entity` | Yes | - | Sensor measuring actual consumption in amps |
+| `load_measurement_delay_seconds` | No | 120 | Time in seconds to use expected load instead of measured load after turning on this specific load (overrides global setting) |
 | `switch_entity` | Yes | - | Switch entity to control the load |
 | `min_toggle_interval_seconds` | No | 600 | Minimum time between on/off switches |
 | `throttle_amps_entity` | No | - | Number entity to control throttle level (enables throttling) |
@@ -131,13 +130,14 @@ Each controllable load has the following configuration:
 
 ZeroGrid creates the following entities that indicate how the system is performing:
 
-| Entity                                | Description                                                                                                                                      |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `sensor.zerogrid_available_load`      | Current available power for new loads (amps). Calculated from grid import + solar generation - house consumption (excluding controllable loads). |
-| `sensor.zerogrid_controlled_load`     | Total power being used by ZeroGrid-controlled loads (amps). Shows the sum of expected consumption for all loads planned to be on.                |
-| `sensor.zerogrid_uncontrolled_load`   | Power used by loads not under ZeroGrid control (amps). Calculated as total house consumption minus controlled loads.                             |
-| `sensor.zerogrid_max_safe_load`       | Maximum safe total load (amps). Calculated from configured limits plus safety margin.                                                            |
-| `binary_sensor.zerogrid_overload`     | Indicates if the system is in an overload state (on = overload detected). Clears automatically when system recovers.                             |
-| `binary_sensor.zerogrid_safety_abort` | Indicates if a safety abort has occurred because critical sensor data is unavailable.                                                            |
-| `switch.zerogrid_enable_load_control` | Master enable/disable for load control. When off, no loads will be automatically controlled. Cycling this also resets any throttling timers.     |
-| `switch.zerogrid_allow_grid_import`   | Enable/disable grid import. When off, only solar power can be used for controllable loads.                                                       |
+| Entity                                | Description                                                                                                                                                                                                              |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sensor.zerogrid_available_load`      | Current available power for new loads (amps). Calculated from grid import + solar generation - house consumption (excluding controllable loads).                                                                         |
+| `sensor.zerogrid_controlled_load`     | Total power being used by ZeroGrid-controlled loads (amps). Shows the sum of expected consumption for all loads planned to be on.                                                                                        |
+| `sensor.zerogrid_uncontrolled_load`   | Power used by loads not under ZeroGrid control (amps). Calculated as total house consumption minus controlled loads.                                                                                                     |
+| `sensor.zerogrid_max_safe_load`       | Maximum safe total load (amps). Calculated from configured limits plus safety margin.                                                                                                                                    |
+| `binary_sensor.zerogrid_overload`     | Indicates if the system is in an overload state (on = overload detected). Clears automatically when system recovers.                                                                                                     |
+| `binary_sensor.zerogrid_safety_abort` | Indicates if a safety abort has occurred because critical sensor data is unavailable.                                                                                                                                    |
+| `switch.zerogrid_enable_load_control` | Master enable/disable for load control. When off, no loads will be automatically controlled. Cycling this also resets any throttling timers.                                                                             |
+| `switch.zerogrid_allow_grid_import`   | Enable/disable grid import. When off, only solar power can be used for controllable loads.                                                                                                                               |
+| `number.zerogrid_reserved_current`    | Amount of current to reserve from the available load (amps), reducing the power available for controllable loads. Can be used to account for charging a battery which may not be included in the house consumption load. |

@@ -93,14 +93,6 @@ class ZeroGridConfigFlow(ConfigFlow, domain=DOMAIN):
                         min=1, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
-                vol.Required(
-                    "load_measurement_delay_seconds",
-                    default=DEFAULT_LOAD_MEASUREMENT_DELAY,
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0, mode=selector.NumberSelectorMode.BOX
-                    )
-                ),
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
@@ -332,16 +324,6 @@ class ZeroGridOptionsFlow(OptionsFlow):
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1, mode=selector.NumberSelectorMode.BOX
-                )
-            ),
-            vol.Required(
-                "load_measurement_delay_seconds",
-                default=current_config.get(
-                    "load_measurement_delay_seconds", DEFAULT_LOAD_MEASUREMENT_DELAY
-                ),
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, mode=selector.NumberSelectorMode.BOX
                 )
             ),
         }

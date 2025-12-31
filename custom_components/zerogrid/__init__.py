@@ -24,7 +24,12 @@ from .state import ControllableLoadPlanState, ControllableLoadState, PlanState, 
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.NUMBER,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
 
 # Store per-entry instances keyed by entry_id
 CONFIGS: dict[str, Config] = {}
@@ -264,9 +269,6 @@ def parse_config(domain_config):
     CONFIG.recalculate_interval_seconds = domain_config.get(
         "recalculate_interval_seconds", 10
     )
-    CONFIG.load_measurement_delay_seconds = domain_config.get(
-        "load_measurement_delay_seconds", 120
-    )
     CONFIG.enable_automatic_recalculation = domain_config.get(
         "enable_automatic_recalculation", True
     )
@@ -434,9 +436,22 @@ async def calculate_effective_available_power(
                     current_load = load_plan.expected_load_amps
             total_load_not_under_control -= current_load
 
+    # Subtract reserved current from available amps
+    state.reserved_current_amps = 0.0
+    if (
+        entry_id in hass.data.get(DOMAIN, {})
+        and "entities" in hass.data[DOMAIN][entry_id]
+        and "reserved_current" in hass.data[DOMAIN][entry_id]["entities"]
+    ):
+        reserved_current_value = hass.data[DOMAIN][entry_id]["entities"][
+            "reserved_current"
+        ].native_value
+        if reserved_current_value is not None:
+            state.reserved_current_amps = float(max(0, reserved_current_value))
+
     # Now calculate total available for load control by subtracting non-controlled loads
     total_available_amps = total_available_power_amps - max(
-        total_load_not_under_control, 0
+        total_load_not_under_control, state.reserved_current_amps, 0
     )
 
     # Determine max window duration based on longest min_toggle_interval
@@ -453,9 +468,10 @@ async def calculate_effective_available_power(
     state.accumulate_available_amps(total_available_amps, max_window_seconds)
 
     _LOGGER.debug(
-        "Total available power: %gA, uncontrolled load: %gA, available for load control: %gA",
+        "Total available power: %gA, uncontrolled load: %gA, reserved current: %gA, available for load control: %gA",
         total_available_power_amps,
         total_load_not_under_control,
+        state.reserved_current_amps,
         total_available_amps,
     )
 

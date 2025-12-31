@@ -60,6 +60,7 @@ class State:
         self.last_recalculation: datetime | None = None
         self.available_amps_history: deque[tuple[datetime, float]] = deque(maxlen=100)
         self.house_consumption_initialised: bool = False
+        self.reserved_current_amps: float = 0.0
 
     def accumulate_available_amps(
         self,

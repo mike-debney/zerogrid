@@ -211,5 +211,12 @@
                 "description": "Set the priority for each position. Loads in higher positions will be prioritized for turning on first and turning off last. Position 0 has the highest priority."
             }
         }
+    },
+    "entity": {
+        "number": {
+            "reserved_current": {
+                "name": "Reserved current"
+            }
+        }
     }
 }

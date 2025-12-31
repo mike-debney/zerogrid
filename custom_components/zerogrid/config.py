@@ -28,7 +28,6 @@ class Config:
     max_solar_generation_amps: float
     safety_margin_amps: float = 2.0
     recalculate_interval_seconds: int = 10
-    load_measurement_delay_seconds: int = 120
     house_consumption_amps_entity: str
     solar_generation_amps_entity: str | None = None
     allow_solar_consumption: bool = False
