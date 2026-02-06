@@ -90,14 +90,15 @@ Below is a reference of all available configuration options. These are entered t
 
 #### System Settings
 
-| Option                           | Required | Default | Description                                                                                                                         |
-| -------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `max_total_load_amps`            | Yes      | -       | Maximum total load your electrical system can handle                                                                                |
-| `max_grid_import_amps`           | Yes      | -       | Maximum power draw allowed from the grid                                                                                            |
-| `max_solar_generation_amps`      | Yes      | -       | Maximum solar generation capacity in amps                                                                                           |
-| `safety_margin_amps`             | No       | 2.0     | Safety buffer above maximum load before triggering overload protection                                                              |
-| `recalculate_interval_seconds`   | No       | 30      | Periodic recalculation interval (in addition to event-driven based on house consumption readings)                                   |
-| `enable_automatic_recalculation` | No       | true    | Enable periodic recalculation of loads. If disabled, recalculation only occurs when house consumption changes.                      |
+| Option                                           | Required | Default | Description                                                                                        |
+| ------------------------------------------------ | -------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `max_total_load_amps`                            | Yes      | -       | Maximum total load your electrical system can handle                                               |
+| `max_grid_import_amps`                           | Yes      | -       | Maximum power draw allowed from the grid                                                           |
+| `max_solar_generation_amps`                      | Yes      | -       | Maximum solar generation capacity in amps                                                          |
+| `safety_margin_amps`                             | No       | 2.0     | Safety buffer above maximum load before triggering overload protection                             |
+| `recalculate_interval_seconds`                   | No       | 30      | Periodic recalculation interval (in addition to event-driven based on house consumption readings)  |
+| `enable_automatic_recalculation`                 | No       | true    | Enable periodic recalculation of loads. If disabled, recalculation only occurs on consumption change |
+| `disable_consumption_unavailable_safety_abort`   | No       | false   | Disable safety abort when house consumption sensor becomes unavailable                             |
 
 #### Monitoring Entities
 
@@ -121,6 +122,8 @@ Each controllable load has the following configuration:
 | `throttle_amps_entity` | No | - | Number entity to control throttle level (enables throttling) |
 | `min_throttle_interval_seconds` | No | 10 | Minimum time between throttle adjustments |
 | `can_turn_on_entity` | No | - | Binary sensor or input_boolean that must be "on" for the load to be turned on |
+| `can_turn_on_ignore_unavailable` | No | false | Allow load to turn on even when `can_turn_on_entity` is unavailable |
+| `assume_always_under_load_control` | No | false | Treat load as under ZeroGrid control whenever it is on, even if turned on externally |
 | `solar_turn_on_window_seconds` | No | 600 | Time window to wait for sufficient solar surplus before turning on this load (only when grid import is disabled) |
 | `solar_turn_off_window_seconds` | No | 300 | Time window to wait before turning off this load when average solar surplus becomes insufficient (only when grid import is disabled) |
 

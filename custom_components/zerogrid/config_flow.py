@@ -93,6 +93,9 @@ class ZeroGridConfigFlow(ConfigFlow, domain=DOMAIN):
                         min=1, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
+                vol.Optional(
+                    "disable_consumption_unavailable_safety_abort", default=False
+                ): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
@@ -326,6 +329,12 @@ class ZeroGridOptionsFlow(OptionsFlow):
                     min=1, mode=selector.NumberSelectorMode.BOX
                 )
             ),
+            vol.Optional(
+                "disable_consumption_unavailable_safety_abort",
+                default=current_config.get(
+                    "disable_consumption_unavailable_safety_abort", False
+                ),
+            ): selector.BooleanSelector(),
         }
 
         # Add solar entity with default only if it exists
@@ -556,6 +565,15 @@ class ZeroGridOptionsFlow(OptionsFlow):
                     )
                 ),
                 vol.Optional(
+                    "can_turn_on_ignore_unavailable", default=False
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    "assume_always_under_load_control", default=False
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    "assume_always_under_load_control", default=False
+                ): selector.BooleanSelector(),
+                vol.Optional(
                     "solar_turn_on_window_seconds",
                     default=DEFAULT_SOLAR_TURN_ON_WINDOW,
                 ): selector.NumberSelector(
@@ -721,6 +739,20 @@ class ZeroGridOptionsFlow(OptionsFlow):
             schema_fields[vol.Optional("can_turn_on_entity")] = selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean"])
             )
+
+        schema_fields[
+            vol.Optional(
+                "can_turn_on_ignore_unavailable",
+                default=current_load.get("can_turn_on_ignore_unavailable", False),
+            )
+        ] = selector.BooleanSelector()
+
+        schema_fields[
+            vol.Optional(
+                "assume_always_under_load_control",
+                default=current_load.get("assume_always_under_load_control", False),
+            )
+        ] = selector.BooleanSelector()
 
         schema_fields[
             vol.Optional(

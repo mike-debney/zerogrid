@@ -133,8 +133,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 state.house_consumption_initialised = True
                 clear_safety_abort(hass, entry.entry_id)
                 await recalculate_load_control(hass, entry.entry_id)
-            else:
+            elif not config.disable_consumption_unavailable_safety_abort:
                 await safety_abort(hass, entry.entry_id)
+            else:
+                _LOGGER.warning(
+                    "House consumption entity unavailable, but safety abort is disabled"
+                )
 
         elif entity_id == config.solar_generation_amps_entity:
             if new_state is not None and new_state.state not in (
@@ -157,6 +161,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         "unavailable",
                     ):
                         load.is_on = new_state.state != "off"
+                        # If option enabled, assume load is under control when on
+                        if load.is_on and load_config.assume_always_under_load_control:
+                            load.is_under_load_control = True
+                            if load.on_since is None:
+                                load.on_since = datetime.now()
                         _LOGGER.debug(
                             "Load %s switch changed to %s",
                             load_config.name,
@@ -181,6 +190,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             "Load %s can_turn_on changed to %s",
                             load_config.name,
                             load.can_turn_on,
+                        )
+                    elif load_config.can_turn_on_ignore_unavailable:
+                        load.can_turn_on = True
+                        _LOGGER.debug(
+                            "Load %s can_turn_on entity unavailable, ignoring safety check",
+                            load_config.name,
                         )
                     else:
                         load.can_turn_on = False
@@ -275,6 +290,9 @@ def parse_config(domain_config):
     CONFIG.house_consumption_amps_entity = domain_config.get(
         "house_consumption_amps_entity", None
     )
+    CONFIG.disable_consumption_unavailable_safety_abort = domain_config.get(
+        "disable_consumption_unavailable_safety_abort", False
+    )
 
     CONFIG.solar_generation_amps_entity = domain_config.get(
         "solar_generation_amps_entity", None
@@ -312,6 +330,12 @@ def parse_config(domain_config):
         control_config.throttle_amps_entity = control.get("throttle_amps_entity", None)
         control_config.can_throttle = control_config.throttle_amps_entity is not None
         control_config.can_turn_on_entity = control.get("can_turn_on_entity", None)
+        control_config.can_turn_on_ignore_unavailable = control.get(
+            "can_turn_on_ignore_unavailable", False
+        )
+        control_config.assume_always_under_load_control = control.get(
+            "assume_always_under_load_control", False
+        )
         CONFIG.controllable_loads[control_config.name] = control_config
 
     _LOGGER.debug("Config successful: %s", CONFIG)
@@ -346,9 +370,13 @@ def initialise_state(hass: HomeAssistant):
             "unavailable",
         ):
             load_state.is_on = hass.states.is_state(config.switch_entity, STATE_ON)
-            load_state.is_under_load_control = (
-                load_state.is_on
-            )  # Assume under control initially
+            # If option enabled, assume load is under control when on
+            if config.assume_always_under_load_control:
+                load_state.is_under_load_control = load_state.is_on
+            else:
+                load_state.is_under_load_control = (
+                    load_state.is_on
+                )  # Assume under control initially
             if load_state.is_on and load_state.is_under_load_control:
                 load_state.on_since = datetime.now()
             else:
@@ -369,6 +397,8 @@ def initialise_state(hass: HomeAssistant):
                 "unavailable",
             ):
                 load_state.can_turn_on = can_turn_on_state.state == STATE_ON
+            elif config.can_turn_on_ignore_unavailable:
+                load_state.can_turn_on = True  # Ignore unavailable, allow turn on
             else:
                 load_state.can_turn_on = False  # Default to safe state
         else:

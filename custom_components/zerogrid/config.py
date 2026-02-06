@@ -18,6 +18,8 @@ class ControllableLoadConfig:
     throttle_amps_entity: str | None = None
     can_throttle: bool = False
     can_turn_on_entity: str | None = None
+    can_turn_on_ignore_unavailable: bool = False
+    assume_always_under_load_control: bool = False
 
 
 class Config:
@@ -32,4 +34,5 @@ class Config:
     solar_generation_amps_entity: str | None = None
     allow_solar_consumption: bool = False
     enable_automatic_recalculation: bool = True
+    disable_consumption_unavailable_safety_abort: bool = False
     controllable_loads: dict[str, ControllableLoadConfig] = {}
