@@ -192,9 +192,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             load.can_turn_on,
                         )
                     elif load_config.can_turn_on_ignore_unavailable:
-                        load.can_turn_on = True
+                        # Keep previous state.can_turn_on value
                         _LOGGER.debug(
-                            "Load %s can_turn_on entity unavailable, ignoring safety check",
+                            "Load %s can_turn_on entity unavailable, keeping previous state",
                             load_config.name,
                         )
                     else:
@@ -688,13 +688,24 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                         config.solar_turn_off_window_seconds,
                     )
 
-        # Log if external constraint is preventing turn on
-        if should_be_on and not state.can_turn_on:
-            should_be_on = False
-            _LOGGER.debug(
-                "Load %s has sufficient power but external constraint prevents turn on",
-                load_name,
-            )
+        # Check external constraint (can_turn_on_entity)
+        if config.can_turn_on_entity is not None:
+            can_turn_on_entity_state = hass.states.get(config.can_turn_on_entity)
+            is_unavailable = can_turn_on_entity_state is None or can_turn_on_entity_state.state in ("unknown", "unavailable")
+            
+            if is_unavailable:
+                if not config.can_turn_on_ignore_unavailable:
+                    state.can_turn_on = False
+                # else: keep previous state.can_turn_on value
+            else:
+                state.can_turn_on = can_turn_on_entity_state.state == "on"
+            
+            if should_be_on and not state.can_turn_on:
+                should_be_on = False
+                _LOGGER.debug(
+                    "Load %s has sufficient power but external constraint prevents turn on",
+                    load_name,
+                )
 
         # Prevent toggling if rate limited
         if state.is_switch_rate_limited:
