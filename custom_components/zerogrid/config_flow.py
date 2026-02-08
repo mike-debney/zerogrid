@@ -241,6 +241,12 @@ class ZeroGridConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 ),
                 vol.Optional(
+                    "can_turn_on_ignore_unavailable", default=False
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    "assume_always_under_load_control", default=False
+                ): selector.BooleanSelector(),
+                vol.Optional(
                     "solar_turn_on_window_seconds",
                     default=DEFAULT_SOLAR_TURN_ON_WINDOW,
                 ): selector.NumberSelector(
@@ -566,9 +572,6 @@ class ZeroGridOptionsFlow(OptionsFlow):
                 ),
                 vol.Optional(
                     "can_turn_on_ignore_unavailable", default=False
-                ): selector.BooleanSelector(),
-                vol.Optional(
-                    "assume_always_under_load_control", default=False
                 ): selector.BooleanSelector(),
                 vol.Optional(
                     "assume_always_under_load_control", default=False
