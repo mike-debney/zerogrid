@@ -443,11 +443,9 @@ async def calculate_effective_available_power(
 
     # Calculate total available power before accounting for loads
     now = datetime.now()
-    total_available_power_amps = grid_maximum_amps + capped_solar_generation_amps
+    max_available_amps = grid_maximum_amps + capped_solar_generation_amps
     # Safety cap to maximum total available load
-    total_available_power_amps = min(
-        total_available_power_amps, config.max_total_load_amps
-    )
+    max_available_amps = min(max_available_amps, config.max_total_load_amps)
 
     # Subtract loads that are under load control, since we can manage those
     total_load_not_under_control = state.house_consumption_amps
@@ -465,6 +463,7 @@ async def calculate_effective_available_power(
                 if time_since_on < load_config.load_measurement_delay_seconds:
                     current_load = load_plan.expected_load_amps
             total_load_not_under_control -= current_load
+    total_load_not_under_control = max(total_load_not_under_control, 0)
 
     # Subtract reserved current from available amps
     state.reserved_current_amps = 0.0
@@ -480,8 +479,10 @@ async def calculate_effective_available_power(
             state.reserved_current_amps = float(max(0, reserved_current_value))
 
     # Now calculate total available for load control by subtracting non-controlled loads
-    total_available_amps = total_available_power_amps - max(
-        total_load_not_under_control, state.reserved_current_amps, 0
+    # and reserved current independently — reserved current limits available power on top of
+    # whatever is already consumed by loads not under our control
+    total_available_amps = (
+        max_available_amps - total_load_not_under_control - state.reserved_current_amps
     )
 
     # Determine max window duration based on longest min_toggle_interval
@@ -499,7 +500,7 @@ async def calculate_effective_available_power(
 
     _LOGGER.debug(
         "Total available power: %gA, uncontrolled load: %gA, reserved current: %gA, available for load control: %gA",
-        total_available_power_amps,
+        max_available_amps,
         total_load_not_under_control,
         state.reserved_current_amps,
         total_available_amps,
@@ -691,15 +692,18 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
         # Check external constraint (can_turn_on_entity)
         if config.can_turn_on_entity is not None:
             can_turn_on_entity_state = hass.states.get(config.can_turn_on_entity)
-            is_unavailable = can_turn_on_entity_state is None or can_turn_on_entity_state.state in ("unknown", "unavailable")
-            
+            is_unavailable = (
+                can_turn_on_entity_state is None
+                or can_turn_on_entity_state.state in ("unknown", "unavailable")
+            )
+
             if is_unavailable:
                 if not config.can_turn_on_ignore_unavailable:
                     state.can_turn_on = False
                 # else: keep previous state.can_turn_on value
             else:
                 state.can_turn_on = can_turn_on_entity_state.state == "on"
-            
+
             if should_be_on and not state.can_turn_on:
                 should_be_on = False
                 _LOGGER.debug(
