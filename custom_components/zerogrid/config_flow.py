@@ -15,7 +15,7 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
-from .const import DOMAIN
+from .const import DOMAIN, LOAD_SWITCH_DOMAINS
 
 DEFAULT_MAX_TOTAL_LOAD_AMPS = 63
 DEFAULT_MAX_GRID_IMPORT_AMPS = 63
@@ -213,9 +213,7 @@ class ZeroGridConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 ),
                 vol.Required("switch_entity"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain=["switch", "input_boolean", "climate"]
-                    )
+                    selector.EntitySelectorConfig(domain=LOAD_SWITCH_DOMAINS)
                 ),
                 vol.Optional(
                     "min_toggle_interval_seconds", default=DEFAULT_MIN_TOGGLE_INTERVAL
@@ -532,9 +530,7 @@ class ZeroGridOptionsFlow(OptionsFlow):
                     )
                 ),
                 vol.Required("switch_entity"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain=["switch", "input_boolean", "climate"]
-                    )
+                    selector.EntitySelectorConfig(domain=LOAD_SWITCH_DOMAINS)
                 ),
                 vol.Required(
                     "min_toggle_interval_seconds", default=DEFAULT_MIN_TOGGLE_INTERVAL
@@ -689,9 +685,7 @@ class ZeroGridOptionsFlow(OptionsFlow):
                 "switch_entity",
                 default=current_load.get("switch_entity"),
             ): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain=["switch", "input_boolean", "climate"]
-                )
+                selector.EntitySelectorConfig(domain=LOAD_SWITCH_DOMAINS)
             ),
             vol.Required(
                 "min_toggle_interval_seconds",

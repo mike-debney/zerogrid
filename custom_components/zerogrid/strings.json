@@ -70,7 +70,7 @@
                     "min_toggle_interval_seconds": "Minimum time between on/off switches to reduce contactor wear",
                     "min_throttle_interval_seconds": "Minimum time between throttle adjustments",
                     "load_amps_entity": "Sensor measuring actual consumption in amps",
-                    "switch_entity": "Switch entity to the load on or off",
+                    "switch_entity": "Entity used to switch the load on or off. Switches, input booleans, thermostats, and humidifiers are supported.",
                     "throttle_amps_entity": "Number entity to control throttle level (leave blank to disable throttling)",
                     "can_turn_on_entity": "Optional binary sensor or input_boolean that must be 'on' for the load to be turned on by load management",
                     "can_turn_on_ignore_unavailable": "When enabled, the load can still turn on even if the constraint entity becomes unavailable or unknown. When disabled (default), an unavailable constraint entity will prevent the load from turning on.",

@@ -7,6 +7,11 @@ DOMAIN = "zerogrid"
 ENABLE_LOAD_CONTROL_SWITCH_ID = f"{DOMAIN}_enable_load_control"
 ALLOW_GRID_IMPORT_SWITCH_ID = f"{DOMAIN}_allow_grid_import"
 
+# Entity domains that can be used as a controllable load's switch entity.
+# All of these expose turn_on/turn_off services, which is all we need to shed
+# or restore a load.
+LOAD_SWITCH_DOMAINS = ["switch", "input_boolean", "climate", "humidifier"]
+
 
 def get_device_info(entry: ConfigEntry) -> DeviceInfo:
     """Get device info for the ZeroGrid load controller."""

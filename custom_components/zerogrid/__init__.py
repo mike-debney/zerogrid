@@ -7,7 +7,7 @@ import logging
 import math
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_ON, Platform
+from homeassistant.const import STATE_OFF, STATE_ON, Platform
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.event import (
@@ -19,7 +19,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .config import Config, ControllableLoadConfig
 from .const import ALLOW_GRID_IMPORT_SWITCH_ID, DOMAIN, ENABLE_LOAD_CONTROL_SWITCH_ID
-from .helpers import parse_entity_domain
+from .helpers import is_entity_usable, parse_entity_domain
 from .state import ControllableLoadPlanState, ControllableLoadState, PlanState, State
 
 _LOGGER = logging.getLogger(__name__)
@@ -365,11 +365,11 @@ def initialise_state(hass: HomeAssistant):
         load_state = ControllableLoadState()
 
         switch_state = hass.states.get(config.switch_entity)
-        if switch_state is not None and switch_state.state not in (
-            "unknown",
-            "unavailable",
-        ):
-            load_state.is_on = hass.states.is_state(config.switch_entity, STATE_ON)
+        if is_entity_usable(switch_state):
+            # A climate entity's state is its HVAC mode (heat, cool, ...) and is
+            # never "on", so treat anything but "off" as on. This matches how
+            # state_automation_listener interprets later state changes.
+            load_state.is_on = switch_state.state != STATE_OFF
             # If option enabled, assume load is under control when on
             if config.assume_always_under_load_control:
                 load_state.is_under_load_control = load_state.is_on
@@ -911,15 +911,18 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState, entry_id: str):
             await safety_abort(hass, entry_id, True)
             return
 
-        switch_domain = parse_entity_domain(config.switch_entity)
-
-        # Check if entity exists before attempting service calls
-        if hass.states.get(config.switch_entity) is None:
-            _LOGGER.error(
-                "Switch entity %s does not exist, skipping control",
+        # Only act on an entity that is present and reporting. A hygrostat or
+        # thermostat is unavailable until its sensor first reports, and its
+        # turn_on/turn_off are no-ops in that window, so switching it here would
+        # leave our state out of sync with the device.
+        if not is_entity_usable(hass.states.get(config.switch_entity)):
+            _LOGGER.debug(
+                "Switch entity %s is unavailable, skipping control",
                 config.switch_entity,
             )
             continue  # Skip this load and continue with the next one
+
+        switch_domain = parse_entity_domain(config.switch_entity)
 
         if new_plan.is_on and not state.is_on:
             _LOGGER.info("Turning on load %s", config.switch_entity)
@@ -1094,15 +1097,24 @@ async def safety_abort(hass: HomeAssistant, entry_id: str, force: bool = False):
     for load_name in config.controllable_loads:
         try:
             lconfig = config.controllable_loads[load_name]
-            switch_domain = parse_entity_domain(lconfig.switch_entity)
-            service_name = "turn_off"
-            await hass.services.async_call(
-                switch_domain,
-                service_name,
-                {"entity_id": lconfig.switch_entity},
-                blocking=True,
-            )
+            if is_entity_usable(hass.states.get(lconfig.switch_entity)):
+                switch_domain = parse_entity_domain(lconfig.switch_entity)
+                service_name = "turn_off"
+                await hass.services.async_call(
+                    switch_domain,
+                    service_name,
+                    {"entity_id": lconfig.switch_entity},
+                    blocking=True,
+                )
+                _LOGGER.info("Turned off load %s for safety", lconfig.switch_entity)
+            else:
+                _LOGGER.warning(
+                    "Switch entity %s is unavailable, cannot turn it off for safety",
+                    lconfig.switch_entity,
+                )
 
+            # Release the load's reservation either way - during an abort we must
+            # not keep budgeting amps for a load we were unable to reach.
             lstate = state.controllable_loads[load_name]
             lstate.is_on = False
             lstate.is_under_load_control = False
@@ -1113,6 +1125,5 @@ async def safety_abort(hass: HomeAssistant, entry_id: str, force: bool = False):
             load_plan.is_on = False
             load_plan.expected_load_amps = 0.0
             load_plan.throttle_amps = 0.0
-            _LOGGER.info("Turned off load %s for safety", config.switch_entity)
         except (ValueError, KeyError, RuntimeError) as err:
-            _LOGGER.error("Failed to turn off %s: %s", config.switch_entity, err)
+            _LOGGER.error("Failed to turn off load %s for safety: %s", load_name, err)
