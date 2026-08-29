@@ -545,6 +545,29 @@ def reset_load_control_state(config: Config, state: State) -> None:
         load.last_toggled = None
 
 
+def read_current_throttle_amps(
+    hass: HomeAssistant,
+    config: ControllableLoadConfig,
+    fallback_amps: float,
+) -> float:
+    """Read the throttle setpoint a load is currently sitting at."""
+    if not config.throttle_amps_entity:
+        return fallback_amps
+
+    throttle_state = hass.states.get(config.throttle_amps_entity)
+    if throttle_state is None:
+        return fallback_amps
+
+    try:
+        return float(throttle_state.state)
+    except (ValueError, TypeError):
+        _LOGGER.warning(
+            "Unable to read throttle value for %s, using previous plan value",
+            config.throttle_amps_entity,
+        )
+        return fallback_amps
+
+
 async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
     """The core of the load control algorithm.
 
@@ -741,25 +764,21 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
         )
 
         if plan.is_on:
-            if config.can_throttle and state.is_throttle_rate_limited:
-                # If we are unable to throttle due to rate limiting, pre-allocate previous throttle
-                will_consume_amps = plan.throttle_amps = previous_plan.throttle_amps
-
-                # Read current throttle value from entity state (not from previous plan)
-                if config.throttle_amps_entity:
-                    throttle_state = hass.states.get(config.throttle_amps_entity)
-                    if throttle_state is not None:
-                        try:
-                            will_consume_amps = plan.throttle_amps = float(
-                                throttle_state.state
-                            )
-                        except (ValueError, TypeError):
-                            _LOGGER.warning(
-                                "Unable to read throttle value for %s",
-                                config.throttle_amps_entity,
-                            )
-
-            elif using_measured_current and not config.can_throttle:
+            if config.can_throttle:
+                # Record where the load is actually sitting so the second pass
+                # can tell an upward move (rate limited) from a downward one.
+                plan.current_throttle_amps = read_current_throttle_amps(
+                    hass, config, previous_plan.throttle_amps
+                )
+                # Reserve only the minimum for a throttleable load, even while it
+                # is throttle rate limited. Reserving what it is currently drawing
+                # makes it look expensive during a spike, which shed lower-priority
+                # fixed loads instead of simply dialling this load back. The second
+                # pass decides the real setpoint.
+                will_consume_amps = plan.throttle_amps = (
+                    config.min_controllable_load_amps
+                )
+            elif using_measured_current:
                 will_consume_amps = state.current_load_amps  # Track actual consumption
             else:
                 # Allocate minimum load, regardless of throttling
@@ -773,40 +792,47 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
         plan.expected_load_amps = will_consume_amps
         plan.using_measured_current = using_measured_current
 
-    # Second pass to allocate any remaining available power by throttling loads up from their minimum
-    if available_amps > 0:
-        for load_name in prioritised_loads:
-            config = CONFIG.controllable_loads[load_name]
-            state = STATE.controllable_loads[load_name]
-            previous_plan = PLAN.controllable_loads[load_name]
-            plan = new_plan.controllable_loads[load_name]
+    # Second pass to set the throttle setpoint of each throttleable load from the
+    # power left over after the first pass. This runs even when there is nothing
+    # left over: a deficit is exactly when a throttleable load has to be dialled
+    # back, and skipping the pass left it sitting at its old setpoint.
+    for load_name in prioritised_loads:
+        config = CONFIG.controllable_loads[load_name]
+        state = STATE.controllable_loads[load_name]
+        plan = new_plan.controllable_loads[load_name]
 
-            # Skip non-throttleable loads and loads that are off
-            if not config.can_throttle or not plan.is_on or not state.is_on:
-                continue
+        # Skip non-throttleable loads and loads that are off
+        if not config.can_throttle or not plan.is_on or not state.is_on:
+            continue
 
-            if state.is_throttle_rate_limited:
-                _LOGGER.debug(
-                    "Skipping throttling load %s due to rate limit at %gA",
-                    load_name,
-                    plan.throttle_amps,
-                )
-                continue
+        # First, give back any power we had previously allocated
+        available_amps += plan.expected_load_amps
 
-            # First, give back any power we had previously allocated
-            available_amps += plan.expected_load_amps
+        # Rate limiting only guards against ramping a load up too often. Dialling
+        # a load back is always allowed - it is the safe direction, and holding it
+        # off is what made a spike shed other loads instead.
+        ceiling_amps = config.max_controllable_load_amps
+        if state.is_throttle_rate_limited:
+            ceiling_amps = min(ceiling_amps, plan.current_throttle_amps)
 
-            # Give the load as much power as we can, accounting for what's currently allocated
-            will_consume_amps = min(
-                available_amps,
-                config.max_controllable_load_amps,
+        # Give the load as much power as we can, accounting for what's currently allocated
+        will_consume_amps = min(
+            available_amps,
+            ceiling_amps,
+        )
+        will_consume_amps = max(
+            math.floor(will_consume_amps), config.min_controllable_load_amps
+        )
+        plan.throttle_amps = plan.expected_load_amps = will_consume_amps
+        available_amps -= will_consume_amps
+
+        if state.is_throttle_rate_limited and will_consume_amps >= ceiling_amps:
+            _LOGGER.debug(
+                "Holding load %s at %gA due to throttle rate limit",
+                load_name,
+                will_consume_amps,
             )
-            will_consume_amps = max(
-                math.floor(will_consume_amps), config.min_controllable_load_amps
-            )
-            plan.throttle_amps = plan.expected_load_amps = will_consume_amps
-            available_amps -= will_consume_amps
-
+        else:
             _LOGGER.debug(
                 "Planning to throttle load %s to %gA", load_name, will_consume_amps
             )
@@ -825,26 +851,73 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
         ):
             overload = True
             _LOGGER.warning(
-                "Overload detected (consumption: %gA, max: %gA, available: %gA), cutting loads in reverse priority",
+                "Overload detected (consumption: %gA, max: %gA, available: %gA), reducing loads in reverse priority",
                 STATE.house_consumption_amps,
                 max_safe_total_load_amps,
                 available_amps,
             )
+
+            # Dial throttleable loads back to their minimum before shedding
+            # anything. A throttleable load can give power back without going
+            # off, so it must be asked before a fixed load is cut.
             for load_name in reversed(prioritised_loads):
+                config = CONFIG.controllable_loads[load_name]
+                state = STATE.controllable_loads[load_name]
+                plan = new_plan.controllable_loads[load_name]
+                if not config.can_throttle or not plan.is_on:
+                    continue
+                if not state.is_under_load_control:
+                    continue  # Out of our control
+                if plan.expected_load_amps <= config.min_controllable_load_amps:
+                    continue  # Already as low as it goes
+
+                available_amps += (
+                    plan.expected_load_amps - config.min_controllable_load_amps
+                )
+                plan.throttle_amps = plan.expected_load_amps = (
+                    config.min_controllable_load_amps
+                )
+                _LOGGER.info(
+                    "Throttling load %s back to %gA to reduce overload",
+                    load_name,
+                    config.min_controllable_load_amps,
+                )
+
+            # Work out how much load still has to go. Reductions already asked
+            # for but not yet reflected in the meter count towards it, so we do
+            # not shed a fixed load for power a throttleable load is already
+            # giving back. If the reduction never arrives we are still overloaded
+            # on the next cycle and will shed then.
+            excess_amps = STATE.house_consumption_amps - max_safe_total_load_amps
+            for load_name in prioritised_loads:
+                config = CONFIG.controllable_loads[load_name]
+                state = STATE.controllable_loads[load_name]
+                plan = new_plan.controllable_loads[load_name]
+                if not config.can_throttle or not plan.is_on:
+                    continue
+                if not state.is_under_load_control:
+                    continue
+                excess_amps -= max(
+                    0.0, state.current_load_amps - plan.expected_load_amps
+                )
+
+            for load_name in reversed(prioritised_loads):
+                if excess_amps <= 0:
+                    break  # Throttling back covered the overload
+
                 plan = new_plan.controllable_loads[load_name]
                 state = STATE.controllable_loads[load_name]
                 if not plan.is_on or not state.is_under_load_control:
                     continue  # Load will already be off or out of our control
 
+                # Cutting the load removes whatever it is really drawing, which
+                # is the measured value unless it has not ramped up yet.
+                excess_amps -= max(state.current_load_amps, plan.expected_load_amps)
                 plan.is_on = False
                 available_amps += plan.expected_load_amps
                 plan.expected_load_amps = 0.0
                 plan.throttle_amps = 0.0
                 _LOGGER.info("Cutting load %s to reduce overload", load_name)
-
-                # Check if we are still overloaded
-                if available_amps >= 0:
-                    break
     else:
         STATE.overload_timestamp = None
 
