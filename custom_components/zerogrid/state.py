@@ -65,6 +65,10 @@ class State:
         self.available_amps_history: deque[tuple[datetime, float]] = deque(maxlen=100)
         self.house_consumption_initialised: bool = False
         self.reserved_current_amps: float = 0.0
+        # Last uncontrolled load figure derived from readings that were all
+        # settled. Used while a load is mid-change and its meter disagrees with
+        # the house meter.
+        self.last_settled_uncontrolled_amps: float | None = None
 
     def accumulate_available_amps(
         self,
