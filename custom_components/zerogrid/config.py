@@ -35,4 +35,13 @@ class Config:
     allow_solar_consumption: bool = False
     enable_automatic_recalculation: bool = True
     disable_consumption_unavailable_safety_abort: bool = False
-    controllable_loads: dict[str, ControllableLoadConfig] = {}
+    controllable_loads: dict[str, ControllableLoadConfig]
+
+    def __init__(self) -> None:
+        """Initialise the configuration.
+
+        controllable_loads is per instance: as a class attribute every config
+        entry shared one dict, so a second entry saw the first entry's loads
+        and unloading either cleared both.
+        """
+        self.controllable_loads = {}
