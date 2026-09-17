@@ -449,20 +449,61 @@ async def calculate_effective_available_power(
 
     # Subtract loads that are under load control, since we can manage those
     total_load_not_under_control = state.house_consumption_amps
+    # Whether this figure is solid enough to remember as a reference, and
+    # whether the readings behind it describe the same instant at all.
+    trust_as_reference = True
+    readings_skewed = False
     for load_name in state.controllable_loads:
         load_state = state.controllable_loads[load_name]
         load_plan = plan.controllable_loads.get(load_name)
 
         if load_state.is_under_load_control and load_state.is_on:
+            load_config = config.controllable_loads[load_name]
             current_load = load_state.current_load_amps
             # Determine if we should use expected load instead of measured load
             # to account for soft starts and measurement delays
             if load_state.on_since is not None and load_plan is not None:
-                load_config = config.controllable_loads[load_name]
                 time_since_on = (now - load_state.on_since).total_seconds()
                 if time_since_on < load_config.load_measurement_delay_seconds:
                     current_load = load_plan.expected_load_amps
+                    # Planned rather than measured, so do not keep it as the
+                    # reference the skew handling below falls back to.
+                    trust_as_reference = False
+            # A throttle change takes a moment to reach the load and longer to
+            # show up on its meter. Until it does, this load's reading and the
+            # house reading describe different instants.
+            if load_state.last_throttled is not None:
+                time_since_throttled = (
+                    now - load_state.last_throttled
+                ).total_seconds()
+                if time_since_throttled < load_config.min_throttle_interval_seconds:
+                    readings_skewed = True
             total_load_not_under_control -= current_load
+
+    # The uncontrolled figure is the house meter minus the loads' own meters,
+    # which are not read at the same instant. While a load is mid-change that
+    # difference is not meaningful, and acting on it is what shed a load that
+    # only needed throttling: a load that had already resumed drawing but whose
+    # meter still read low was counted as uncontrolled load we could not manage.
+    # A negative result is the same skew seen from the other side - the loads
+    # cannot draw more than the whole house - and clamping it to zero advertised
+    # headroom that did not exist, which pushed a throttle up just before the
+    # meter caught up. In both cases hold the last settled figure instead. A
+    # genuine overload is still caught straight from the house meter by the
+    # overload pass in plan_loads, which does not use this figure.
+    if total_load_not_under_control < 0:
+        readings_skewed = True
+
+    if readings_skewed and state.last_settled_uncontrolled_amps is not None:
+        _LOGGER.debug(
+            "Load measurements unsettled (derived uncontrolled load: %gA), holding last settled value of %gA",
+            total_load_not_under_control,
+            state.last_settled_uncontrolled_amps,
+        )
+        total_load_not_under_control = state.last_settled_uncontrolled_amps
+    elif not readings_skewed and trust_as_reference:
+        state.last_settled_uncontrolled_amps = total_load_not_under_control
+
     total_load_not_under_control = max(total_load_not_under_control, 0)
 
     # Subtract reserved current from available amps
@@ -538,6 +579,7 @@ async def calculate_effective_available_power(
 def reset_load_control_state(config: Config, state: State) -> None:
     """Reset load control state when load control is disabled or re-enabled."""
     state.available_amps_history.clear()
+    state.last_settled_uncontrolled_amps = None
     for control in config.controllable_loads.values():
         load = state.controllable_loads[control.name]
         load.is_under_load_control = True
