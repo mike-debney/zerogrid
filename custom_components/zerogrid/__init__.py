@@ -300,6 +300,10 @@ def parse_config(domain_config):
     CONFIG.allow_solar_consumption = CONFIG.solar_generation_amps_entity is not None
 
     control_options = domain_config.get("controllable_loads", [])
+    # Rebind rather than mutate: the attribute is declared on the class, so
+    # every Config would otherwise share one dict, and reparsing after a load
+    # was removed in the options would leave the removed load behind.
+    CONFIG.controllable_loads = {}
     for priority, control in enumerate(control_options):
         control_config = ControllableLoadConfig()
         control_config.name = control.get("name")
@@ -310,12 +314,25 @@ def parse_config(domain_config):
         control_config.min_controllable_load_amps = control.get(
             "min_controllable_load_amps"
         )
+        # These are durations, and are fed straight to timedelta by the rate
+        # limit checks, so fall back to the class defaults rather than storing
+        # None when a load is configured without them.
         control_config.min_toggle_interval_seconds = control.get(
-            "min_toggle_interval_seconds", None
+            "min_toggle_interval_seconds",
+            ControllableLoadConfig.min_toggle_interval_seconds,
         )
+        if control_config.min_toggle_interval_seconds is None:
+            control_config.min_toggle_interval_seconds = (
+                ControllableLoadConfig.min_toggle_interval_seconds
+            )
         control_config.min_throttle_interval_seconds = control.get(
-            "min_throttle_interval_seconds", None
+            "min_throttle_interval_seconds",
+            ControllableLoadConfig.min_throttle_interval_seconds,
         )
+        if control_config.min_throttle_interval_seconds is None:
+            control_config.min_throttle_interval_seconds = (
+                ControllableLoadConfig.min_throttle_interval_seconds
+            )
         control_config.load_measurement_delay_seconds = control.get(
             "load_measurement_delay_seconds", 120
         )
@@ -1152,8 +1169,13 @@ def clear_safety_abort(hass: HomeAssistant, entry_id: str):
     """Clear safety abort state if system has recovered."""
 
     state = hass.data[DOMAIN][entry_id]["state"]
+    # The countdown to an abort starts on the first unusable reading, which is
+    # before the abort itself becomes active. Clearing it only once an abort is
+    # active left the timestamp behind whenever a blip recovered on its own,
+    # and the next blip - however brief - then found its grace period already
+    # spent and cut every load immediately.
+    state.safety_abort_timestamp = None
     if state.safety_abort_active:
-        state.safety_abort_timestamp = None
         state.safety_abort_active = False
         if (
             entry_id in hass.data.get(DOMAIN, {})

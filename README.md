@@ -144,3 +144,24 @@ ZeroGrid creates the following entities that indicate how the system is performi
 | `switch.zerogrid_enable_load_control` | Master enable/disable for load control. When off, no loads will be automatically controlled. Cycling this also resets any throttling timers.                                                                             |
 | `switch.zerogrid_allow_grid_import`   | Enable/disable grid import. When off, only solar power can be used for controllable loads.                                                                                                                               |
 | `number.zerogrid_reserved_current`    | Amount of current to reserve from the available load (amps), reducing the power available for controllable loads. Can be used to account for charging a battery which may not be included in the house consumption load. |
+
+## Development
+
+### Running the tests
+
+```bash
+pip install -r requirements-test.txt
+pytest
+```
+
+The suite drives the real planning code - the rate limits, the throttle passes
+and the overload pass - against a fake Home Assistant state machine and service
+registry defined in `tests/conftest.py`. Home Assistant itself is not a test
+dependency, which keeps the suite fast and runnable on any Python version.
+
+Because the fake service registry decides when a command is reflected back into
+the fake state machine, the tests can stage timing faults that are awkward to
+reproduce against a live install: a meter that has not caught up with a setpoint,
+a switch that has not reported its new state, or a sensor that drops out and
+recovers. `tests/test_regression_incident.py` replays one such fault from
+recorded sensor readings.
