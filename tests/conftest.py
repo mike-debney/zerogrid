@@ -115,6 +115,7 @@ _install_homeassistant_stubs()
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from custom_components.zerogrid import (  # noqa: E402
+    apply_switch_state,
     calculate_effective_available_power,
     execute_plan,
     initialise_state,
@@ -306,17 +307,14 @@ class Harness:
     entities: dict = field(default_factory=dict)
 
     def _on_entity_state(self, entity_id: str, new_state) -> None:
-        """Mirror the integration's state listener for switch entities.
+        """Route a switch entity report through the integration's own handler.
 
-        Only the part the tests depend on: a load reporting its own on/off
-        state back after a service call.
+        This is the path a device's state takes in a real install, so the
+        tests exercise the same code rather than a copy of it.
         """
         for name, cfg in self.config.controllable_loads.items():
             if entity_id == cfg.switch_entity:
-                if new_state.state not in ("unknown", "unavailable"):
-                    self.state.controllable_loads[name].is_on = (
-                        new_state.state != "off"
-                    )
+                apply_switch_state(cfg, self.state.controllable_loads[name], new_state)
 
     # -- inputs ----------------------------------------------------------
     def set_house_amps(self, amps: float) -> None:
