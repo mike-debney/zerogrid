@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import sys
 import types
-import typing
 from pathlib import Path
 
 import pytest
@@ -34,16 +33,6 @@ def _install_homeassistant_stubs() -> None:
     """Register fake `homeassistant.*` modules in sys.modules."""
     if "homeassistant" in sys.modules:
         return
-
-    # helpers.py annotates a return type as TypeIs[State]. TypeIs only exists
-    # in typing from Python 3.13, and the annotation is evaluated at import.
-    if not hasattr(typing, "TypeIs"):
-
-        class _TypeIs:
-            def __class_getitem__(cls, _item):
-                return bool
-
-        typing.TypeIs = _TypeIs
 
     def module(name: str) -> types.ModuleType:
         mod = types.ModuleType(name)
@@ -160,16 +149,25 @@ class ServiceCall:
 
 
 class FakeStates:
-    """Stand-in for hass.states."""
+    """Stand-in for hass.states.
+
+    Notifies subscribers the way Home Assistant's state machine does, so a
+    device reporting a new state reaches the integration by the same route it
+    would in a real install.
+    """
 
     def __init__(self) -> None:
         self._states: dict[str, HA_STATE] = {}
+        self.listeners: list = []
 
     def get(self, entity_id: str):
         return self._states.get(entity_id)
 
-    def set(self, entity_id: str, state) -> None:
+    def set(self, entity_id: str, state, *, notify: bool = True) -> None:
         self._states[entity_id] = HA_STATE(entity_id, str(state))
+        if notify:
+            for listener in list(self.listeners):
+                listener(entity_id, self._states[entity_id])
 
     def remove(self, entity_id: str) -> None:
         self._states.pop(entity_id, None)
@@ -307,6 +305,19 @@ class Harness:
     plan: PlanState
     entities: dict = field(default_factory=dict)
 
+    def _on_entity_state(self, entity_id: str, new_state) -> None:
+        """Mirror the integration's state listener for switch entities.
+
+        Only the part the tests depend on: a load reporting its own on/off
+        state back after a service call.
+        """
+        for name, cfg in self.config.controllable_loads.items():
+            if entity_id == cfg.switch_entity:
+                if new_state.state not in ("unknown", "unavailable"):
+                    self.state.controllable_loads[name].is_on = (
+                        new_state.state != "off"
+                    )
+
     # -- inputs ----------------------------------------------------------
     def set_house_amps(self, amps: float) -> None:
         """Set total house consumption, as the real listener would."""
@@ -421,26 +432,28 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def build(config_data: dict) -> Harness:
+def build(
+    config_data: dict,
+    *,
+    entry_id: str = "test_entry",
+    hass: FakeHass | None = None,
+) -> Harness:
     """Set the integration up against a fake Home Assistant.
 
-    Mirrors async_setup_entry without the platform plumbing.
+    Mirrors async_setup_entry without the platform plumbing. Pass an entry_id
+    and an existing hass to stand a second config entry up alongside the first.
     """
-    entry_id = "test_entry"
-    hass = FakeHass()
+    fresh = hass is None
+    hass = hass if hass is not None else FakeHass()
 
-    # The integration keeps module level CONFIG/STATE/PLAN for backwards
-    # compatibility, so reset them rather than leaking between tests.
-    zerogrid.CONFIGS.clear()
-    zerogrid.STATES.clear()
-    zerogrid.PLANS.clear()
+    # Each entry owns its config, state and plan.
+    if fresh:
+        zerogrid.CONFIGS.clear()
+        zerogrid.STATES.clear()
+        zerogrid.PLANS.clear()
     config = zerogrid.CONFIGS[entry_id] = Config()
-    config.controllable_loads = {}
     state = zerogrid.STATES[entry_id] = State()
     plan = zerogrid.PLANS[entry_id] = PlanState()
-    zerogrid.CONFIG = config
-    zerogrid.STATE = state
-    zerogrid.PLAN = plan
 
     # Seed entity states before parsing so initialise_state sees them.
     for block in config_data.get("controllable_loads", []):
@@ -454,8 +467,8 @@ def build(config_data: dict) -> Harness:
     if config_data.get("solar_generation_amps_entity"):
         hass.states.set(config_data["solar_generation_amps_entity"], 0)
 
-    parse_config(config_data)
-    initialise_state(hass)
+    parse_config(config, config_data)
+    initialise_state(hass, config, state, plan)
 
     entities = {
         ENABLE_LOAD_CONTROL_SWITCH_ID: FakeSwitchEntity(True),
@@ -481,7 +494,9 @@ def build(config_data: dict) -> Harness:
     state.enable_load_control = True
     state.allow_grid_import = True
 
-    return Harness(hass, entry_id, config, state, plan, entities)
+    harness = Harness(hass, entry_id, config, state, plan, entities)
+    hass.states.listeners.append(harness._on_entity_state)
+    return harness
 
 
 @pytest.fixture

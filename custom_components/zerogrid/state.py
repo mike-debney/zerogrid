@@ -44,6 +44,10 @@ class ControllableLoadState:
         self.is_throttle_rate_limited: bool = False
         self.on_since: datetime | None = None
         self.can_turn_on: bool = True  # External constraint allowing turn on
+        # The on/off command we last sent and are still waiting to see
+        # reflected in the switch's own state.
+        self.switch_command_on: bool | None = None
+        self.switch_command_since: datetime | None = None
 
 
 class State:
