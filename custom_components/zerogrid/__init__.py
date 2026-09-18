@@ -828,14 +828,13 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                     load_config.min_controllable_load_amps
                 )
             elif using_measured_current:
-                # Track actual consumption, but never budget a load that is on
-                # for less than its configured minimum. A meter that momentarily
-                # reads low would otherwise look like free capacity, which is
-                # handed to another load just before this one takes it back.
-                will_consume_amps = max(
-                    load_state.current_load_amps,
-                    load_config.min_controllable_load_amps,
-                )
+                # Track actual consumption. A thermostatic load sits on with its
+                # element cycled off for long stretches, and reserving its rated
+                # draw the whole time starves the loads below it. The window
+                # where its meter cannot be trusted is already covered: until
+                # load_measurement_delay_seconds has passed, using_measured_current
+                # is false and the branch below reserves the load's minimum.
+                will_consume_amps = load_state.current_load_amps
             else:
                 # Allocate minimum load, regardless of throttling
                 will_consume_amps = load_plan.throttle_amps = (

@@ -80,23 +80,38 @@ def test_startup_survives_a_sensor_reporting_nonsense(make):
 # -- a meter that dips --------------------------------------------------
 
 
-def test_a_fixed_load_still_reserves_its_minimum_when_its_meter_dips(house):
-    """A momentary low reading must not look like free capacity.
+def test_a_load_that_has_not_ramped_up_yet_reserves_its_minimum(house):
+    """Straight after a turn on, the meter has not caught up.
 
-    The cylinder is a 14A load. If its meter reads 0 for one cycle while it is
-    still on, budgeting 0 for it hands 14A to something else.
+    Until the measurement delay has passed the load is budgeted at its
+    configured minimum rather than at whatever its meter happens to say.
     """
-    house.set_house_amps(55.4)
-    house.adopt("Hot Water Cylinder", amps=13.2)
-    house.adopt("Car Charger", amps=23.3, setpoint=23)
-    house.recalculate()
-    settled_setpoint = house.plan.controllable_loads["Car Charger"].throttle_amps
+    house.set_house_amps(20.0)
+    house.adopt("Hot Water Cylinder", amps=0.0)
+    house.state.controllable_loads["Hot Water Cylinder"].on_since = datetime.now()
 
-    house.set_load_amps("Hot Water Cylinder", 0.0)
     house.recalculate()
 
-    assert house.plan.controllable_loads["Hot Water Cylinder"].expected_load_amps >= 14.0
-    assert house.plan.controllable_loads["Car Charger"].throttle_amps <= settled_setpoint
+    assert house.plan.controllable_loads["Hot Water Cylinder"].expected_load_amps == 14.0
+
+
+def test_an_idle_thermostatic_load_frees_its_capacity(house):
+    """A load that is on but not drawing must not hold its rating.
+
+    A hot water cylinder or a heater sits on with its element cycled off for
+    long stretches. Reserving its full rating throughout leaves the charger
+    below it on a fraction of the power the house actually has spare.
+    """
+    house.set_house_amps(21.5)
+    house.adopt("Hot Water Cylinder", amps=0.05)  # on, element cycled off
+    house.adopt("Car Charger", amps=15.0, setpoint=15)
+
+    house.recalculate()
+
+    # The cylinder is budgeted at what it draws, not its 14A rating, so the
+    # charger gets the rest of the budget.
+    assert house.plan.controllable_loads["Hot Water Cylinder"].expected_load_amps < 1.0
+    assert house.plan.controllable_loads["Car Charger"].throttle_amps == 32
 
 
 # -- a switch that answers late -----------------------------------------
