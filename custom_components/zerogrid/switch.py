@@ -96,7 +96,7 @@ class EnableLoadControlSwitch(SwitchEntity, RestoreEntity):
         return bool(self._attr_is_on)
 
     async def _update_integration_state(self) -> None:
-        """Update the integration's STATE and trigger recalculation."""
+        """Update this entry's state and trigger recalculation."""
         if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
             # Get the entry-specific config and state
             entry_data = self.hass.data[DOMAIN].get(self.entry.entry_id)
@@ -178,7 +178,7 @@ class AllowGridImportSwitch(SwitchEntity, RestoreEntity):
         return bool(self._attr_is_on)
 
     async def _update_integration_state(self) -> None:
-        """Update the integration's STATE and trigger recalculation."""
+        """Update this entry's state and trigger recalculation."""
         if hasattr(self.hass, "data") and DOMAIN in self.hass.data:
             # Get the entry-specific config and state
             entry_data = self.hass.data[DOMAIN].get(self.entry.entry_id)
