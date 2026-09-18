@@ -197,3 +197,75 @@ def test_a_pending_command_never_blocks_the_opposite_command(house):
     house.recalculate()
 
     assert house.was_turned_off("Dehumidifier")
+
+
+# -- a switch that is not ready when we start ---------------------------
+
+
+def test_a_load_unavailable_at_startup_is_still_trusted_once_it_reports(house):
+    """The reload case: the thermostat entity lags the integration.
+
+    initialise_state skips a switch entity that is not reporting yet, so the
+    load never gets an on_since from there, and we never turn it on ourselves
+    because it is already on. Without an on_since its meter is never trusted
+    and it holds its full rating for as long as it runs.
+    """
+    cfg = house.config.controllable_loads["Hot Water Cylinder"]
+    load_state = house.state.controllable_loads["Hot Water Cylinder"]
+
+    # As after a reload: nothing known about the load yet.
+    load_state.is_on = False
+    load_state.on_since = None
+    load_state.is_under_load_control = True
+
+    # The thermostat finally reports, a few seconds late.
+    house.hass.states.set(cfg.switch_entity, "heat")
+
+    assert load_state.is_on
+    assert load_state.on_since is not None
+
+
+def test_an_idle_load_that_started_unavailable_frees_its_capacity(house):
+    """The whole point: its capacity reaches the loads below it."""
+    cfg = house.config.controllable_loads["Hot Water Cylinder"]
+    load_state = house.state.controllable_loads["Hot Water Cylinder"]
+    load_state.is_on = False
+    load_state.on_since = None
+    load_state.is_under_load_control = True
+
+    house.hass.states.set(cfg.switch_entity, "heat")
+    house.set_load_amps("Hot Water Cylinder", 0.056)
+    # Past the measurement delay, so its meter should be believed.
+    load_state.on_since = datetime.now() - timedelta(seconds=60)
+
+    house.set_house_amps(21.6)
+    house.adopt("Car Charger", amps=15.0, setpoint=15)
+    house.recalculate()
+
+    assert house.plan.controllable_loads["Hot Water Cylinder"].expected_load_amps < 1.0
+    assert house.plan.controllable_loads["Car Charger"].throttle_amps == 32
+
+
+def test_a_load_reporting_off_forgets_when_it_came_on(house):
+    cfg = house.config.controllable_loads["Hot Water Cylinder"]
+    load_state = house.state.controllable_loads["Hot Water Cylinder"]
+
+    house.hass.states.set(cfg.switch_entity, "heat")
+    assert load_state.on_since is not None
+
+    house.hass.states.set(cfg.switch_entity, "off")
+
+    assert not load_state.is_on
+    assert load_state.on_since is None
+
+
+def test_an_unavailable_switch_report_changes_nothing(house):
+    cfg = house.config.controllable_loads["Hot Water Cylinder"]
+    load_state = house.state.controllable_loads["Hot Water Cylinder"]
+    house.hass.states.set(cfg.switch_entity, "heat")
+    was_on_since = load_state.on_since
+
+    house.hass.states.set(cfg.switch_entity, "unavailable")
+
+    assert load_state.is_on
+    assert load_state.on_since == was_on_since

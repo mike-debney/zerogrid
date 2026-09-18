@@ -147,21 +147,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 load = state.controllable_loads[load_config.name]
 
                 if entity_id == load_config.switch_entity:
-                    if new_state is not None and new_state.state not in (
-                        "unknown",
-                        "unavailable",
-                    ):
-                        load.is_on = new_state.state != "off"
-                        # If option enabled, assume load is under control when on
-                        if load.is_on and load_config.assume_always_under_load_control:
-                            load.is_under_load_control = True
-                            if load.on_since is None:
-                                load.on_since = datetime.now()
-                        _LOGGER.debug(
-                            "Load %s switch changed to %s",
-                            load_config.name,
-                            new_state.state,
-                        )
+                    apply_switch_state(load_config, load, new_state)
                 elif entity_id == load_config.load_amps_entity:
                     load_amps = parse_amps(new_state)
                     if load_amps is not None:
@@ -254,6 +240,38 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             del PLANS[entry.entry_id]
 
     return unload_ok
+
+
+def apply_switch_state(
+    config: ControllableLoadConfig, load: ControllableLoadState, new_state
+) -> None:
+    """Take a load's switch state from its entity.
+
+    A climate or humidifier entity reports its mode rather than on/off, so
+    anything but "off" counts as on.
+    """
+    if not is_entity_usable(new_state):
+        return
+
+    load.is_on = new_state.state != STATE_OFF
+
+    # If option enabled, assume load is under control when on
+    if load.is_on and config.assume_always_under_load_control:
+        load.is_under_load_control = True
+
+    if load.is_on:
+        # Start the measurement delay from the first time we see the load on.
+        # A switch entity that was still unavailable when this integration set
+        # up - a thermostat on a reload, say - is never turned on by us, so
+        # nothing else would ever set this. Its meter would then stay untrusted
+        # for as long as it ran, holding it at its configured minimum and
+        # keeping that capacity from the loads below it.
+        if load.on_since is None:
+            load.on_since = datetime.now()
+    else:
+        load.on_since = None
+
+    _LOGGER.debug("Load %s switch changed to %s", config.name, new_state.state)
 
 
 def parse_config(config: Config, domain_config) -> None:
