@@ -188,11 +188,18 @@ class FakeServices:
         self.calls: list[ServiceCall] = []
         self.apply = True
         self.fail_with: Exception | None = None
+        # One device whose integration is down, while the rest still answer.
+        self.fail_entities: dict[str, Exception] = {}
+        self.hang_entities: set[str] = set()
 
     async def async_call(self, domain, service, data, blocking=False) -> None:
         self.calls.append(ServiceCall(domain, service, dict(data)))
         if self.fail_with is not None:
             raise self.fail_with
+        if data["entity_id"] in self.fail_entities:
+            raise self.fail_entities[data["entity_id"]]
+        if data["entity_id"] in self.hang_entities:
+            await asyncio.sleep(3600)
         if not self.apply:
             return
         entity_id = data["entity_id"]
@@ -478,6 +485,9 @@ def build(
         "max_safe_load_sensor": FakeSensorEntity(),
         "overload_sensor": FakeSensorEntity(),
         "safety_abort_sensor": FakeSensorEntity(),
+        "unresponsive_sensors": {
+            name: FakeSensorEntity() for name in config.controllable_loads
+        },
     }
 
     hass.data.setdefault(DOMAIN, {})

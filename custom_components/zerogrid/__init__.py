@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import logging
 import math
@@ -27,6 +28,15 @@ _LOGGER = logging.getLogger(__name__)
 # How long to let a load report the state we asked it for before the command is
 # treated as lost and sent again.
 SWITCH_COMMAND_TIMEOUT_SECONDS = 30
+
+# How long to wait for a load to accept a command before counting it as failed.
+# A cloud-controlled load can otherwise hold a recalculation up for as long as
+# its API takes to give up.
+COMMAND_CALL_TIMEOUT_SECONDS = 15
+
+# How long to leave a load alone after each consecutive failed command. A load
+# whose API is down would otherwise be sent a command on every recalculation.
+COMMAND_BACKOFF_SECONDS = (30, 60, 120, 300, 600)
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -481,6 +491,16 @@ async def calculate_effective_available_power(
 
         if load_state.is_under_load_control and load_state.is_on:
             load_config = config.controllable_loads[load_name]
+            if is_load_unresponsive(load_state, now):
+                # It will not follow the plan, so its draw stays in the
+                # uncontrolled figure, along with whatever it could still rise
+                # to. That takes it off the top before priorities are applied,
+                # so every other load makes room for it.
+                total_load_not_under_control += (
+                    unresponsive_load_amps(hass, load_config, load_state)
+                    - load_state.current_load_amps
+                )
+                continue
             current_load = load_state.current_load_amps
             # Determine if we should use expected load instead of measured load
             # to account for soft starts and measurement delays
@@ -634,7 +654,134 @@ def read_current_throttle_amps(
         return fallback_amps
 
 
+def is_load_unresponsive(load: ControllableLoadState, now: datetime) -> bool:
+    """Return True while a load is being left alone after a failed command.
+
+    Once the backoff runs out the load rejoins the plan for a cycle, so the
+    retry is planned and budgeted like any other command.
+    """
+    return load.command_retry_after is not None and now < load.command_retry_after
+
+
+def unresponsive_load_amps(
+    hass: HomeAssistant, config: ControllableLoadConfig, load: ControllableLoadState
+) -> float:
+    """Return what an unresponsive load could draw without being asked.
+
+    Its meter says what it draws now, but nothing stops it from rising to its
+    setpoint - a charger resuming after a pause - or to its rating if it cannot
+    be throttled, and we could not dial it back if it did.
+    """
+    if config.can_throttle:
+        setpoint = parse_amps(hass.states.get(config.throttle_amps_entity))
+        ceiling = (
+            setpoint if setpoint is not None else config.max_controllable_load_amps
+        )
+    else:
+        ceiling = config.max_controllable_load_amps
+    return max(load.current_load_amps, ceiling)
+
+
+def update_unresponsive_sensor(
+    hass: HomeAssistant, entry_id: str, load_name: str, unresponsive: bool
+) -> None:
+    """Report a load's unresponsive state on its binary sensor, if it has one."""
+    sensors = (
+        hass.data.get(DOMAIN, {})
+        .get(entry_id, {})
+        .get("entities", {})
+        .get("unresponsive_sensors", {})
+    )
+    if load_name in sensors:
+        sensors[load_name].update_state(unresponsive)
+
+
+async def call_load_service(
+    hass: HomeAssistant,
+    entry_id: str,
+    load_name: str,
+    domain: str,
+    service: str,
+    data: dict,
+) -> bool:
+    """Send a command to a load and record whether it was accepted.
+
+    Any failure is the load's, not ours: a cloud integration raises whatever its
+    HTTP library does, and letting that escape stopped the plan from reaching
+    the loads after this one. A failure starts a backoff during which the load
+    is not sent anything and is budgeted as uncontrolled load.
+    """
+    state = hass.data[DOMAIN][entry_id]["state"]
+    load = state.controllable_loads[load_name]
+    try:
+        await asyncio.wait_for(
+            hass.services.async_call(domain, service, data, blocking=True),
+            COMMAND_CALL_TIMEOUT_SECONDS,
+        )
+    except Exception as err:  # noqa: BLE001 - see docstring
+        load.command_failures += 1
+        backoff_seconds = COMMAND_BACKOFF_SECONDS[
+            min(load.command_failures, len(COMMAND_BACKOFF_SECONDS)) - 1
+        ]
+        load.command_retry_after = datetime.now() + timedelta(seconds=backoff_seconds)
+        # The uncontrolled figure now includes this load, so the last settled
+        # one no longer describes the same thing.
+        state.last_settled_uncontrolled_amps = None
+        _LOGGER.warning(
+            "Load %s did not accept %s.%s (%s: %s), treating it as uncontrolled and retrying in %ds",
+            load_name,
+            domain,
+            service,
+            type(err).__name__,
+            err,
+            backoff_seconds,
+        )
+        update_unresponsive_sensor(hass, entry_id, load_name, True)
+        return False
+
+    if load.command_failures > 0:
+        _LOGGER.info(
+            "Load %s is accepting commands again after %d failures",
+            load_name,
+            load.command_failures,
+        )
+        mark_load_responsive(hass, entry_id, load_name)
+    return True
+
+
+def mark_load_responsive(hass: HomeAssistant, entry_id: str, load_name: str) -> None:
+    """Clear a load's failed command record."""
+    state = hass.data[DOMAIN][entry_id]["state"]
+    load = state.controllable_loads[load_name]
+    load.command_failures = 0
+    load.command_retry_after = None
+    state.last_settled_uncontrolled_amps = None
+    update_unresponsive_sensor(hass, entry_id, load_name, False)
+
+
 async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
+    """Run one planning cycle, unless the previous one is still running."""
+    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if entry_data is None:
+        _LOGGER.error("Entry %s not found in hass.data", entry_id)
+        return
+
+    state = entry_data["state"]
+    if state.recalculating:
+        _LOGGER.debug(
+            "Recalculation skipped - previous one still running for entry %s",
+            entry_id,
+        )
+        return
+
+    state.recalculating = True
+    try:
+        await _recalculate_load_control(hass, entry_id)
+    finally:
+        state.recalculating = False
+
+
+async def _recalculate_load_control(hass: HomeAssistant, entry_id: str):
     """The core of the load control algorithm.
 
     This function is intentionally complex as it handles the complete load planning
@@ -744,6 +891,26 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
             # Load is manually turned on - we have no control
             load_plan.is_on = load_state.is_on
             _LOGGER.debug("Load %s manually turned on, skipping control", load_name)
+            continue
+
+        if is_load_unresponsive(load_state, now):
+            # Plan it where it is. Its draw is already counted as uncontrolled
+            # load, so it takes no share of what is left.
+            load_plan.is_on = load_state.is_on
+            if load_config.can_throttle:
+                # Its integration is likely unavailable too, so fall back
+                # quietly rather than warning on every cycle.
+                setpoint = parse_amps(
+                    hass.states.get(load_config.throttle_amps_entity)
+                )
+                load_plan.throttle_amps = load_plan.current_throttle_amps = (
+                    setpoint if setpoint is not None else previous_plan.throttle_amps
+                )
+            _LOGGER.debug(
+                "Load %s is not accepting commands, leaving it as it is until %s",
+                load_name,
+                load_state.command_retry_after,
+            )
             continue
 
         will_consume_amps = 0.0
@@ -877,6 +1044,8 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
         # Skip non-throttleable loads and loads that are off
         if not load_config.can_throttle or not load_plan.is_on or not load_state.is_on:
             continue
+        if is_load_unresponsive(load_state, now):
+            continue  # Held where it is by the first pass
 
         # First, give back any power we had previously allocated
         available_amps += load_plan.expected_load_amps
@@ -941,6 +1110,8 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                     continue
                 if not load_state.is_under_load_control:
                     continue  # Out of our control
+                if is_load_unresponsive(load_state, now):
+                    continue  # It would not be asked, so it gives nothing back
                 if load_plan.expected_load_amps <= load_config.min_controllable_load_amps:
                     continue  # Already as low as it goes
 
@@ -970,6 +1141,8 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                     continue
                 if not load_state.is_under_load_control:
                     continue
+                if is_load_unresponsive(load_state, now):
+                    continue
                 excess_amps -= max(
                     0.0, load_state.current_load_amps - load_plan.expected_load_amps
                 )
@@ -982,6 +1155,8 @@ async def recalculate_load_control(hass: HomeAssistant, entry_id: str):
                 load_state = state.controllable_loads[load_name]
                 if not load_plan.is_on or not load_state.is_under_load_control:
                     continue  # Load will already be off or out of our control
+                if is_load_unresponsive(load_state, now):
+                    continue  # Cutting it would free nothing
 
                 # Cutting the load removes whatever it is really drawing, which
                 # is the measured value unless it has not ramped up yet.
@@ -1072,7 +1247,13 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState, entry_id: str):
             )
             continue  # Skip this load and continue with the next one
 
+        # A load that failed its last command is left alone until its backoff
+        # runs out. The plan has already budgeted it as uncontrolled load.
+        if is_load_unresponsive(load_state, now):
+            continue
+
         switch_domain = parse_entity_domain(load_config.switch_entity)
+        sent_command = False
 
         # A switch reports its new state through the state listener, which can
         # take longer than the gap between two recalculations. Forget the
@@ -1103,49 +1284,38 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState, entry_id: str):
                 "Load %s has not reported yet, not repeating the command",
                 load_config.switch_entity,
             )
-        elif new_plan.is_on and not load_state.is_on:
-            _LOGGER.info("Turning on load %s", load_config.switch_entity)
-            load_state.last_toggled = now
-            load_state.switch_command_on = True
-            load_state.switch_command_since = now
-            try:
-                # Use domain-specific service calls for better compatibility
-                service_name = "turn_on"
-                await hass.services.async_call(
-                    switch_domain,
-                    service_name,
-                    {"entity_id": load_config.switch_entity},
-                    blocking=True,  # Wait for completion to ensure success
-                )
-                load_state.is_under_load_control = True
-                load_state.on_since = now  # Track when load was turned on
-            except (ValueError, KeyError, RuntimeError, ServiceValidationError) as err:
-                _LOGGER.error("Failed to turn on %s: %s", load_config.switch_entity, err)
-
-        elif not new_plan.is_on and load_state.is_on:
-            _LOGGER.info("Turning off load %s", load_config.switch_entity)
-            load_state.last_toggled = now
-            load_state.switch_command_on = False
-            load_state.switch_command_since = now
-            try:
-                # Use domain-specific service calls for better compatibility
-                service_name = "turn_off"
-                await hass.services.async_call(
-                    switch_domain,
-                    service_name,
-                    {"entity_id": load_config.switch_entity},
-                    blocking=True,  # Wait for completion to ensure success
-                )
-                load_state.is_under_load_control = False
-                load_state.on_since = None  # Clear on_since when turned off
-            except (ValueError, KeyError, RuntimeError, ServiceValidationError) as err:
-                _LOGGER.error("Failed to turn off %s: %s", load_config.switch_entity, err)
+        elif new_plan.is_on != load_state.is_on:
+            turning_on = new_plan.is_on
+            _LOGGER.info(
+                "Turning %s load %s",
+                "on" if turning_on else "off",
+                load_config.switch_entity,
+            )
+            sent_command = True
+            # Only a command the load accepted starts the toggle rate limit. A
+            # failed one changed nothing, and holding the load to its toggle
+            # interval would keep it from being retried once its backoff ends.
+            if await call_load_service(
+                hass,
+                entry_id,
+                load_name,
+                switch_domain,
+                "turn_on" if turning_on else "turn_off",
+                {"entity_id": load_config.switch_entity},
+            ):
+                load_state.last_toggled = now
+                load_state.switch_command_on = turning_on
+                load_state.switch_command_since = now
+                load_state.is_under_load_control = turning_on
+                # Track when the load was turned on
+                load_state.on_since = now if turning_on else None
 
         if (
             load_config.can_throttle
             and new_plan.is_on
             and load_config.throttle_amps_entity
             and load_state.is_under_load_control
+            and not is_load_unresponsive(load_state, now)
         ):
             # Check if throttle entity exists
             throttle_state = hass.states.get(load_config.throttle_amps_entity)
@@ -1174,32 +1344,24 @@ async def execute_plan(hass: HomeAssistant, plan: PlanState, entry_id: str):
                         load_config.throttle_amps_entity,
                         round(new_plan.throttle_amps),
                     )
-                    load_state.last_throttled = now
-                    number_domain = parse_entity_domain(load_config.throttle_amps_entity)
-                    try:
-                        # Use domain-specific service for number entities
-                        service_name = "set_value"
-                        service_data = {
+                    sent_command = True
+                    if await call_load_service(
+                        hass,
+                        entry_id,
+                        load_name,
+                        parse_entity_domain(load_config.throttle_amps_entity),
+                        "set_value",
+                        {
                             "entity_id": load_config.throttle_amps_entity,
                             "value": new_plan.throttle_amps,  # Don't convert to string
-                        }
-                        await hass.services.async_call(
-                            number_domain,
-                            service_name,
-                            service_data,
-                            blocking=True,  # Wait for completion to ensure success
-                        )
-                    except (
-                        ValueError,
-                        KeyError,
-                        RuntimeError,
-                        ServiceValidationError,
-                    ) as err:
-                        _LOGGER.error(
-                            "Failed to throttle %s: %s",
-                            load_config.throttle_amps_entity,
-                            err,
-                        )
+                        },
+                    ):
+                        load_state.last_throttled = now
+
+        # A load whose backoff ran out and that the plan did not need to change
+        # is already where we want it, so it is no longer a problem.
+        if not sent_command and load_state.command_failures > 0:
+            mark_load_responsive(hass, entry_id, load_name)
 
     # Deep copy the controllable loads to avoid sharing references with the plan we just built
     committed_plan.available_amps = plan.available_amps
@@ -1286,15 +1448,18 @@ async def safety_abort(hass: HomeAssistant, entry_id: str, force: bool = False):
         try:
             lconfig = config.controllable_loads[load_name]
             if is_entity_usable(hass.states.get(lconfig.switch_entity)):
-                switch_domain = parse_entity_domain(lconfig.switch_entity)
-                service_name = "turn_off"
-                await hass.services.async_call(
-                    switch_domain,
-                    service_name,
+                # Sent even to a load in backoff: this is the one command worth
+                # an extra call. A failure is logged and recorded, and does not
+                # stop the loads after it from being turned off.
+                if await call_load_service(
+                    hass,
+                    entry_id,
+                    load_name,
+                    parse_entity_domain(lconfig.switch_entity),
+                    "turn_off",
                     {"entity_id": lconfig.switch_entity},
-                    blocking=True,
-                )
-                _LOGGER.info("Turned off load %s for safety", lconfig.switch_entity)
+                ):
+                    _LOGGER.info("Turned off load %s for safety", lconfig.switch_entity)
             else:
                 _LOGGER.warning(
                     "Switch entity %s is unavailable, cannot turn it off for safety",
