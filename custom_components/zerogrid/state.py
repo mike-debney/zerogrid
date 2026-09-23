@@ -48,6 +48,11 @@ class ControllableLoadState:
         # reflected in the switch's own state.
         self.switch_command_on: bool | None = None
         self.switch_command_since: datetime | None = None
+        # Commands this load has failed to accept in a row, and when it may
+        # next be sent one. Until then it is left alone and budgeted as load we
+        # do not control, since it will not follow the plan.
+        self.command_failures: int = 0
+        self.command_retry_after: datetime | None = None
 
 
 class State:
@@ -73,6 +78,10 @@ class State:
         # settled. Used while a load is mid-change and its meter disagrees with
         # the house meter.
         self.last_settled_uncontrolled_amps: float | None = None
+        # Set while a recalculation is running. A slow device can hold one up
+        # for seconds, and meter updates arriving meanwhile must not start
+        # another that sends the same commands again.
+        self.recalculating: bool = False
 
     def accumulate_available_amps(
         self,

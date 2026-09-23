@@ -11,6 +11,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import slugify
 
 from .const import DOMAIN, get_device_info
 
@@ -39,7 +40,19 @@ async def async_setup_entry(
         safety_abort_sensor
     )
 
-    async_add_entities([overload_sensor, safety_abort_sensor])
+    # One per load, on while the load is not accepting commands.
+    config = hass.data[DOMAIN][entry.entry_id]["config"]
+    unresponsive_sensors = {
+        load_name: LoadUnresponsiveBinarySensor(entry, device_info, load_name)
+        for load_name in config.controllable_loads
+    }
+    hass.data[DOMAIN][entry.entry_id]["entities"]["unresponsive_sensors"] = (
+        unresponsive_sensors
+    )
+
+    async_add_entities(
+        [overload_sensor, safety_abort_sensor, *unresponsive_sensors.values()]
+    )
 
 
 class OverloadBinarySensor(BinarySensorEntity):
@@ -81,4 +94,25 @@ class SafetyAbortBinarySensor(BinarySensorEntity):
     def update_state(self, is_abort: bool) -> None:
         """Update the binary sensor state and notify HA."""
         self._attr_is_on = is_abort
+        self.async_write_ha_state()
+
+
+class LoadUnresponsiveBinarySensor(BinarySensorEntity):
+    """Binary sensor indicating a load is not accepting commands."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_should_poll = False
+
+    def __init__(self, entry: ConfigEntry, device_info, load_name: str) -> None:
+        """Initialize the binary sensor."""
+        self._attr_name = f"{load_name} unresponsive"
+        self._attr_unique_id = f"{entry.entry_id}_{slugify(load_name)}_unresponsive"
+        self._attr_is_on = False
+        self._attr_device_info = device_info
+
+    @callback
+    def update_state(self, is_unresponsive: bool) -> None:
+        """Update the binary sensor state and notify HA."""
+        self._attr_is_on = is_unresponsive
         self.async_write_ha_state()
